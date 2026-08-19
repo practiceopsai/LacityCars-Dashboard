@@ -4,6 +4,11 @@ One repo → three Railway services plus managed Postgres and Redis.
 Never commit Railway tokens or any credentials to this repo; set them as
 Railway service variables (and GitHub Actions secrets for CI).
 
+CLI uploads use the root `Dockerfile` and `railway.json`. The same image is
+built for all application services; `APP_SERVICE` selects the process:
+`api`, `worker`, or `web`. The nested service configs remain available when
+deploying through a GitHub-linked Railway service.
+
 ## 1. Databases
 
 In a new Railway project add **PostgreSQL** and **Redis** plugins/services.
@@ -28,6 +33,7 @@ Use Railway variable references for infrastructure:
 
 **api**
 ```
+APP_SERVICE    = api
 DATABASE_URL   = ${{Postgres.DATABASE_URL}}
 REDIS_URL      = ${{Redis.REDIS_URL}}
 WEB_ORIGIN     = https://<web-domain>
@@ -39,6 +45,7 @@ NODE_ENV       = production
 
 **worker**
 ```
+APP_SERVICE       = worker
 DATABASE_URL   = ${{Postgres.DATABASE_URL}}
 REDIS_URL      = ${{Redis.REDIS_URL}}
 HERMES_ENDPOINT   = https://<orgo-hermes-host>/run
@@ -50,6 +57,7 @@ NODE_ENV       = production
 
 **web**
 ```
+APP_SERVICE = web
 API_URL  = https://<api-domain>      # needed at BUILD time (rewrite target).
                                      # Use Railway's private networking URL
                                      # (http://api.railway.internal:PORT) if preferred.
