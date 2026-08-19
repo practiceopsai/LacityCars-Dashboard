@@ -30,7 +30,7 @@ then Retry from the vehicle page (freight is preserved; it re-dispatches
 immediately).
 
 ### Webhook signature failures (401 in API logs)
-`HERMES_WEBHOOK_SECRET` mismatch or Hermes isn't signing the *raw* body.
+`HERMES_WEBHOOK_SECRET` mismatch or Hermes isn't signing the *raw* callback body.
 Every attempt is stored in `WebhookEvent` with `signatureValid=false` for audit.
 
 ### Duplicate intake
@@ -48,11 +48,12 @@ and Railway tokens belong only in Railway/CI secret stores.
 | `OPERATOR_PASSWORD` | set new value on api service, redeploy | operator logs in with the new password |
 | `SESSION_SECRET` | set new value, redeploy api | all sessions invalidated; operator re-logs in |
 | `HERMES_WEBHOOK_SECRET` | update on the Hermes agent **and** api together | callbacks signed with the old secret are rejected (401) |
-| `HERMES_API_TOKEN` | update on the Hermes agent **and** worker together | triggers with the old token are rejected by Hermes |
+| `HERMES_TRIGGER_SECRET` | update on the Hermes webhook route **and** worker together | triggers with the old secret are rejected by Hermes |
+| `HERMES_PROXY_TOKEN` | update on the worker when the Orgo server token rotates | Orgo rejects the transport request before it reaches Hermes |
 | `DATABASE_URL` / `REDIS_URL` | rotate credentials in Railway; references update automatically | redeploy all three services |
 
 Rotation order for the paired secrets: configure the receiver to accept the new
-value first (Hermes for the token, api for the webhook secret), then update the
+value first (Hermes for the trigger secret, api for the webhook secret), then update the
 sender, then remove the old value.
 
 ## Data audit

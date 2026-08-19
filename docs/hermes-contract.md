@@ -5,10 +5,25 @@ milestones** to the API webhook (inbound). All bodies are JSON (UTF-8).
 
 ## 1. Trigger (worker → Hermes)
 
-`POST {HERMES_ENDPOINT}` with `Authorization: Bearer {HERMES_API_TOKEN}`.
+`POST {HERMES_ENDPOINT}` to Hermes's native webhook route. The raw JSON body
+is signed with `HERMES_TRIGGER_SECRET`:
+
+On Orgo, `HERMES_ENDPOINT` is the authenticated computer `/bash` route
+and `HERMES_LOCAL_WEBHOOK_URL` is the loopback Hermes route. The worker wraps
+the signed event in one base64-safe PowerShell forwarding command because Orgo
+does not expose arbitrary guest ports. Without that bridge, the worker sends
+the same signed body directly to `HERMES_ENDPOINT`.
+
+| Header | Value |
+| --- | --- |
+| `X-Webhook-Timestamp` | current Unix timestamp in seconds |
+| `X-Webhook-Signature-V2` | hex HMAC-SHA256 of `<timestamp>.<raw body>` |
+| `X-Request-ID` | the payload `request_id` (Hermes idempotency key) |
+| `Authorization` | optional `Bearer HERMES_PROXY_TOKEN` for the Orgo computer API transport |
 
 ```json
 {
+  "event_type": "vehicle.ready",
   "request_id": "cmb123abc:0",
   "callback_url": "https://api.example.com/api/webhooks/hermes",
   "store": {
@@ -53,8 +68,10 @@ milestones** to the API webhook (inbound). All bodies are JSON (UTF-8).
 - The trigger is idempotent on our side: a vehicle is claimed atomically before
   the request is sent and can never be triggered twice concurrently. Hermes
   should also treat a repeated `request_id` as the same run.
-- Respond `2xx` to acknowledge. Any non-2xx / timeout is retried by the worker
+- Hermes responds `202` after accepting the independent agent run. Any non-2xx / timeout is retried by the worker
   (5 attempts, exponential backoff), then the vehicle is marked `FAILED`.
+- The worker permits one active desktop run. Later READY vehicles remain
+  delayed while another vehicle is `PROCESSING`.
 
 ## 2. Callback (Hermes → API)
 

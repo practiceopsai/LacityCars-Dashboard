@@ -1,0 +1,19 @@
+AUTOMATED VEHICLE STOCKING JOB FROM THE AUTHENTICATED DASHBOARD.
+
+This HMAC-authenticated vehicle.ready event is explicit authorization to stock and post exactly this one vehicle for exactly the named store. Load and follow the vehicle-stock-in skill and the repository's .hermes.md contract. Never broaden the store or vehicle scope.
+
+Request ID: {request_id}
+Callback URL: {callback_url}
+Store: {store.name} ({store.code})
+AutoSoft instance: {store.autosoft_instance}
+Stock prefix: {store.stock_prefix}
+VIN: {vehicle.vin}
+Vehicle: {vehicle.model}
+Proposed stock number: {vehicle.stock_number}
+Freight amount: {freight.amount}
+Freight evidence: {freight.evidence}
+Corrections: {corrections}
+
+Before touching a live system, start the mandatory RAG run and complete every preflight gate, including duplicate VIN, current store, authoritative NextGear/source, dispatch evidence, accounting balance, and exact VIN-field clearing. The dashboard freight evidence is authoritative input but must still pass the playbook's defensibility checks. Process no other dashboard vehicle during this run.
+
+When live work begins, call tools/dashboard_callback.py with PROCESSING. Always finish the RAG lifecycle. Then call the same helper with a terminal COMPLETED or FAILED payload containing request_id, VIN, stock number when assigned, ACV, freight, final total, RAG commit, concise run summary, and the exact failure reason when blocked. A missing source, missing defensible freight, duplicate/store conflict, rejected PIN, unexpected screen, or accounting mismatch must fail closed and be reported; never estimate or bypass a gate.

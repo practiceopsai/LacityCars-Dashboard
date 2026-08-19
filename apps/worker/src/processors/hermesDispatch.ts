@@ -1,4 +1,4 @@
-import type { Job } from "bullmq";
+import { DelayedError, type Job } from "bullmq";
 import type { Redis } from "ioredis";
 import { transitionVehicle, type PrismaClient } from "@lacity/database";
 import type { HermesTriggerPayload, InternalCharge } from "@lacity/shared";
@@ -27,7 +27,7 @@ export interface HermesDeps {
 export function createHermesProcessor(deps: HermesDeps) {
   const { prisma, config, publisher } = deps;
 
-  return async (job: Job<HermesJobData>): Promise<void> => {
+  return async (job: Job<HermesJobData>, token?: string): Promise<void> => {
     const { vehicleId } = job.data;
     const vehicle = await prisma.vehicle.findUnique({
       where: { id: vehicleId },
@@ -36,6 +36,22 @@ export function createHermesProcessor(deps: HermesDeps) {
     if (!vehicle) {
       logger.warn({ vehicleId }, "Hermes dispatch for unknown vehicle; dropping");
       return;
+    }
+
+    // Hermes webhook deliveries use independent sessions, so the gateway can
+    // run them concurrently. AutoSoft cannot. Keep later READY vehicles in the
+    // BullMQ delayed set until the currently PROCESSING vehicle completes.
+    const activeVehicle = await prisma.vehicle.findFirst({
+      where: { status: "PROCESSING", id: { not: vehicleId } },
+      select: { id: true },
+    });
+    if (activeVehicle) {
+      await job.moveToDelayed(Date.now() + config.HERMES_BUSY_DELAY_MS, token);
+      logger.info(
+        { vehicleId, activeVehicleId: activeVehicle.id },
+        "Hermes desktop busy; dispatch delayed",
+      );
+      throw new DelayedError();
     }
 
     const requestId = `${vehicle.id}:${vehicle.dispatchNonce}`;
@@ -120,19 +136,12 @@ export function createHermesProcessor(deps: HermesDeps) {
       throw err;
     }
 
-    await prisma.vehicleEvent.create({
-      data: {
-        vehicleId,
-        type: "HERMES_TRIGGERED",
-        message: `Hermes triggered (request ${requestId})`,
-        payload: { request_id: requestId, endpoint: config.HERMES_ENDPOINT },
-      },
+    const updated = await transitionVehicle(prisma, vehicleId, "PROCESSING", {
+      eventType: "HERMES_TRIGGERED",
+      message: `Hermes accepted vehicle-ready event (request ${requestId})`,
+      payload: { request_id: requestId, endpoint: config.HERMES_ENDPOINT },
     });
-    const fresh = await prisma.vehicle.findUniqueOrThrow({
-      where: { id: vehicleId },
-      include: { store: true },
-    });
-    await publishVehicle(publisher, fresh);
+    await publishVehicle(publisher, updated);
     logger.info({ vehicleId, requestId }, "Hermes triggered");
   };
 }

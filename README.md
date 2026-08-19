@@ -93,7 +93,7 @@ Names live in [.env.example](.env.example) — values never belong in the repo.
 | Service | Variables |
 | --- | --- |
 | api | `DATABASE_URL`, `REDIS_URL`, `API_PORT`, `WEB_ORIGIN`, `SESSION_SECRET`, `OPERATOR_PASSWORD`, `HERMES_WEBHOOK_SECRET` |
-| worker | `DATABASE_URL`, `REDIS_URL`, `HERMES_ENDPOINT`, `HERMES_API_TOKEN`, `PUBLIC_API_URL`, `DISPATCH_WORKBOOK_URL` *or* `DISPATCH_WORKBOOK_PATH`, `FREIGHT_MAX_ATTEMPTS`, `FREIGHT_BACKOFF_BASE_MS`, `FREIGHT_BACKOFF_MAX_MS` |
+| worker | `DATABASE_URL`, `REDIS_URL`, `HERMES_ENDPOINT`, optional `HERMES_LOCAL_WEBHOOK_URL`, `HERMES_TRIGGER_SECRET`, optional `HERMES_PROXY_TOKEN`, `PUBLIC_API_URL`, `DISPATCH_WORKBOOK_URL` *or* `DISPATCH_WORKBOOK_PATH`, `FREIGHT_MAX_ATTEMPTS`, `FREIGHT_BACKOFF_BASE_MS`, `FREIGHT_BACKOFF_MAX_MS` |
 | web | `API_URL` (internal URL of the API; used by the `/api/*` rewrite, needed at build time) |
 
 ## Railway deployment
@@ -114,9 +114,10 @@ against the Railway database.
 
 ## Hermes / Orgo webhook setup
 
-1. Give the Hermes agent its trigger endpoint credentials: it must accept
-   `POST` with `Authorization: Bearer <HERMES_API_TOKEN>` (the same token the
-   worker sends).
+1. Enable Hermes's native `vehicle-stocking` webhook route with the same
+   `HERMES_TRIGGER_SECRET` used by the worker. The worker sends timestamp-bound
+   HMAC-v2 signatures. For the Orgo computer API transport, set its server-only bearer token as
+   `HERMES_PROXY_TOKEN`.
 2. Configure Hermes to sign every callback body with `HERMES_WEBHOOK_SECRET`
    (`X-Hermes-Signature: sha256=<hex hmac-sha256(raw body)>`) and POST it to
    `https://<api-domain>/api/webhooks/hermes`. Include a stable

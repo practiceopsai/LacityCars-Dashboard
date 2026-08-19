@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Job } from "bullmq";
+import { DelayedError, type Job } from "bullmq";
 import type { Redis } from "ioredis";
 import type { PrismaClient } from "@lacity/database";
 import type { WorkerConfig } from "../config";
@@ -15,10 +15,12 @@ vi.mock("@lacity/database", () => ({ transitionVehicle: vi.fn() }));
 
 import { triggerHermes } from "../hermesClient";
 import { publishVehicle } from "../publish";
+import { transitionVehicle } from "@lacity/database";
 
 const config = {
   PUBLIC_API_URL: "https://api.example.com/",
   HERMES_ENDPOINT: "https://hermes.example.com/trigger",
+  HERMES_BUSY_DELAY_MS: 30_000,
 } as WorkerConfig;
 
 const store = {
@@ -51,6 +53,7 @@ function makePrisma(vehicle: unknown, claimCount: number) {
     vehicle: {
       findUnique: vi.fn().mockResolvedValue(vehicle),
       findUniqueOrThrow: vi.fn().mockResolvedValue(vehicle),
+      findFirst: vi.fn().mockResolvedValue(null),
       updateMany: vi.fn().mockResolvedValue({ count: claimCount }),
     },
     vehicleEvent: {
@@ -60,13 +63,21 @@ function makePrisma(vehicle: unknown, claimCount: number) {
 }
 
 function makeJob(): Job<HermesJobData> {
-  return { data: { vehicleId: "veh-1" }, opts: { attempts: 5 }, attemptsMade: 0 } as unknown as Job<HermesJobData>;
+  return {
+    data: { vehicleId: "veh-1" },
+    opts: { attempts: 5 },
+    attemptsMade: 0,
+    moveToDelayed: vi.fn().mockResolvedValue(undefined),
+  } as unknown as Job<HermesJobData>;
 }
 
 const publisher = {} as Redis;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(transitionVehicle).mockResolvedValue(
+    makeVehicle({ status: "PROCESSING" }) as never,
+  );
 });
 
 describe("createHermesProcessor", () => {
@@ -99,6 +110,23 @@ describe("createHermesProcessor", () => {
     expect(publishVehicle).not.toHaveBeenCalled();
   });
 
+  it("delays a READY vehicle while another vehicle owns the desktop", async () => {
+    const prisma = makePrisma(makeVehicle(), 1);
+    prisma.vehicle.findFirst.mockResolvedValue({ id: "veh-active" });
+    const job = makeJob();
+    const processor = createHermesProcessor({
+      prisma: prisma as unknown as PrismaClient,
+      config,
+      publisher,
+    });
+
+    await expect(processor(job, "worker-token")).rejects.toBeInstanceOf(DelayedError);
+
+    expect(job.moveToDelayed).toHaveBeenCalledWith(expect.any(Number), "worker-token");
+    expect(prisma.vehicle.updateMany).not.toHaveBeenCalled();
+    expect(triggerHermes).not.toHaveBeenCalled();
+  });
+
   it("claims, triggers Hermes with callback URL and freight evidence, then publishes", async () => {
     const prisma = makePrisma(makeVehicle(), 1);
     const processor = createHermesProcessor({
@@ -120,9 +148,12 @@ describe("createHermesProcessor", () => {
       }),
     );
 
-    expect(prisma.vehicleEvent.create).toHaveBeenCalledWith(
+    expect(transitionVehicle).toHaveBeenCalledWith(
+      prisma,
+      "veh-1",
+      "PROCESSING",
       expect.objectContaining({
-        data: expect.objectContaining({ type: "HERMES_TRIGGERED" }),
+        eventType: "HERMES_TRIGGERED",
       }),
     );
     expect(publishVehicle).toHaveBeenCalledOnce();

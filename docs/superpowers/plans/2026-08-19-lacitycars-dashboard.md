@@ -14,7 +14,7 @@
 
 - Canonical states: `PENDING, AWAITING_FREIGHT, READY, PROCESSING, ACTION_REQUIRED, COMPLETED, FAILED`.
 - Freight: exact normalized 17-char VIN match; per-car = whole load price / distinct active VINs on normalized load; headers resolved by name; cancelled/void/declined rows excluded; scientific-notation load IDs normalized; absent ⇒ AWAITING_FREIGHT + BullMQ backoff; **never estimate freight**.
-- Hermes trigger idempotent, never concurrent per vehicle; auth via `HERMES_API_TOKEN`. Webhook auth via `HERMES_WEBHOOK_SECRET` HMAC, constant-time compare, state-transition + idempotency enforcement, immutable event storage.
+- Hermes trigger idempotent, never concurrent per vehicle; native webhook auth via `HERMES_TRIGGER_SECRET`, with optional Orgo computer API transport auth via `HERMES_PROXY_TOKEN`. Callback auth uses `HERMES_WEBHOOK_SECRET` HMAC with constant-time comparison, state-transition and idempotency enforcement, and immutable event storage.
 - Stores seeded: LA City (aliases LA, LA City Cars; prefix L; AutoSoft "LA City Cars") and Columbia City (aliases Columbia, Columbia City Cars; prefix S; AutoSoft "Columbia City Cars LLC"); both charges Pack 1761 + LoJack 134 + CSC3MPro 55 + Cilajet 54 = 2004. No accounting PINs/credentials in DB.
 - No secrets in source; `.env.example` names + safe values only. Typecheck, lint, tests, prod builds must pass; commit only then.
 - Node >= 20.19 (Node 22 compatible). No mock secrets, no TODO-only endpoints, no silent freight fallback.

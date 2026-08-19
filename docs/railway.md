@@ -48,8 +48,10 @@ NODE_ENV       = production
 APP_SERVICE       = worker
 DATABASE_URL   = ${{Postgres.DATABASE_URL}}
 REDIS_URL      = ${{Redis.REDIS_URL}}
-HERMES_ENDPOINT   = https://<orgo-hermes-host>/run
-HERMES_API_TOKEN  = <token provisioned on the Hermes agent>
+HERMES_ENDPOINT   = https://www.orgo.ai/api/computers/<computer-id>/bash
+HERMES_LOCAL_WEBHOOK_URL = http://127.0.0.1:8644/webhooks/vehicle-stocking
+HERMES_TRIGGER_SECRET = <same HMAC secret as the Hermes webhook route>
+HERMES_PROXY_TOKEN = <Orgo server-side API token; never expose to the browser>
 PUBLIC_API_URL    = https://<api-domain>
 DISPATCH_WORKBOOK_URL = <https URL of the current dispatch workbook>
 NODE_ENV       = production
@@ -85,8 +87,9 @@ This creates the schema and seeds LA City + Columbia City deterministically
 ## 5. Hermes side
 
 Configure the Hermes agent on the Orgo computer with:
-- our trigger auth token (`HERMES_API_TOKEN`) — it must require it,
-- the webhook signing secret (`HERMES_WEBHOOK_SECRET`),
+- the native `vehicle-stocking` route and its `HERMES_TRIGGER_SECRET`,
+- Orgo computer API transport authentication (`HERMES_PROXY_TOKEN`),
+- the callback signing secret (`HERMES_WEBHOOK_SECRET`),
 - the callback URL `https://<api-domain>/api/webhooks/hermes`.
 
 See [hermes-contract.md](hermes-contract.md).

@@ -23,7 +23,8 @@ async function main(): Promise<void> {
   const hermesWorker = new Worker<HermesJobData>(
     HERMES_QUEUE,
     createHermesProcessor({ prisma, config, publisher }),
-    { connection, concurrency: 3 },
+    // One desktop can safely operate only one AutoSoft session at a time.
+    { connection, concurrency: 1 },
   );
 
   for (const [name, worker] of [
