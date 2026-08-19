@@ -18,7 +18,12 @@ let cached: ApiConfig | undefined;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   if (cached) return cached;
-  const parsed = EnvSchema.safeParse(env);
+  // Railway and most container platforms inject PORT. API_PORT remains
+  // supported for local development and explicit overrides.
+  const parsed = EnvSchema.safeParse({
+    ...env,
+    API_PORT: env.API_PORT ?? env.PORT,
+  });
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
     throw new Error(`Invalid API environment: ${issues}`);

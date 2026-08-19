@@ -30,7 +30,6 @@ Use Railway variable references for infrastructure:
 ```
 DATABASE_URL   = ${{Postgres.DATABASE_URL}}
 REDIS_URL      = ${{Redis.REDIS_URL}}
-API_PORT       = ${{PORT}}            # Railway injects PORT; map it through
 WEB_ORIGIN     = https://<web-domain>
 SESSION_SECRET         = <generate: openssl rand -hex 32>
 OPERATOR_PASSWORD      = <strong operator password>
@@ -60,7 +59,10 @@ NODE_ENV = production
 > `API_URL` is read when the Next.js build runs — set it before the first
 > deploy and redeploy web after changing it.
 
-## 4. One-time database setup
+## 4. Database setup
+
+The API service runs the schema push and deterministic seed as its Railway
+pre-deploy command. For a manual setup or recovery run, use:
 
 From your machine (with `DATABASE_URL` pointed at the Railway Postgres):
 

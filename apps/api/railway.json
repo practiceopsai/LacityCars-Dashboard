@@ -5,6 +5,7 @@
     "dockerfilePath": "apps/api/Dockerfile"
   },
   "deploy": {
+    "preDeployCommand": "pnpm --filter @lacity/database db:push && pnpm --filter @lacity/database db:seed",
     "startCommand": "node apps/api/dist/index.js",
     "healthcheckPath": "/ready",
     "healthcheckTimeout": 120,
