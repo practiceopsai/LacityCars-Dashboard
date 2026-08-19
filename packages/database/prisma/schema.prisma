@@ -1,0 +1,117 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum VehicleStatus {
+  PENDING
+  AWAITING_FREIGHT
+  READY
+  PROCESSING
+  ACTION_REQUIRED
+  COMPLETED
+  FAILED
+}
+
+model Store {
+  id               String    @id @default(cuid())
+  code             String    @unique
+  name             String
+  aliases          String[]
+  stockPrefix      String
+  autosoftInstance String
+  /// [{ label: string, amount: number }] — whole dollars. Never credentials/PINs.
+  internalCharges  Json
+  chargesTotal     Int
+  active           Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  vehicles         Vehicle[]
+}
+
+model Vehicle {
+  id                 String         @id @default(cuid())
+  storeId            String
+  store              Store          @relation(fields: [storeId], references: [id])
+  vin                String
+  model              String
+  status             VehicleStatus  @default(PENDING)
+  stockNumber        String?
+  freightAmount      Decimal?       @db.Decimal(12, 2)
+  /// Freight calculation evidence from the dispatch workbook (load, price, divisor VINs, rows).
+  freightEvidence    Json?
+  acv                Decimal?       @db.Decimal(12, 2)
+  finalTotal         Decimal?       @db.Decimal(12, 2)
+  ragCommitId        String?
+  failureReason      String?
+  runSummary         String?
+  /// Attempts made to find freight on the dispatch workbook.
+  freightAttempts    Int            @default(0)
+  nextFreightCheckAt DateTime?
+  /// Idempotency/concurrency guard for Hermes dispatch. Cleared to allow re-dispatch.
+  hermesDispatchedAt DateTime?
+  /// Monotonic nonce so operator retries produce fresh BullMQ job IDs.
+  dispatchNonce      Int            @default(0)
+  hermesRequestId    String?        @unique
+  completedAt        DateTime?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  events             VehicleEvent[]
+  corrections        Correction[]
+  webhookEvents      WebhookEvent[]
+
+  @@index([storeId, vin])
+  @@index([status])
+  @@index([vin])
+}
+
+/// Immutable append-only timeline. Rows are never updated or deleted.
+model VehicleEvent {
+  id         String   @id @default(cuid())
+  vehicleId  String
+  vehicle    Vehicle  @relation(fields: [vehicleId], references: [id])
+  type       String
+  fromStatus String?
+  toStatus   String?
+  message    String?
+  payload    Json?
+  createdAt  DateTime @default(now())
+
+  @@index([vehicleId, createdAt])
+}
+
+/// Immutable record of every Hermes callback received, valid or not.
+model WebhookEvent {
+  id             String    @id @default(cuid())
+  vehicleId      String?
+  vehicle        Vehicle?  @relation(fields: [vehicleId], references: [id])
+  /// Unique idempotency key: X-Hermes-Delivery header or a hash of the raw body.
+  dedupeKey      String    @unique
+  requestId      String?
+  vin            String?
+  status         String?
+  payload        Json
+  signatureValid Boolean
+  applied        Boolean   @default(false)
+  rejectReason   String?
+  receivedAt     DateTime  @default(now())
+  processedAt    DateTime?
+
+  @@index([vehicleId, receivedAt])
+}
+
+model Correction {
+  id        String   @id @default(cuid())
+  vehicleId String
+  vehicle   Vehicle  @relation(fields: [vehicleId], references: [id])
+  note      String
+  fields    Json?
+  createdBy String   @default("operator")
+  createdAt DateTime @default(now())
+
+  @@index([vehicleId, createdAt])
+}

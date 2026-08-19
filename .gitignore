@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Builds
+dist/
+.next/
+out/
+*.tsbuildinfo
+
+# Environment — never commit secrets
+.env
+.env.*
+!.env.example
+
+# Test / coverage
+coverage/
+
+# Logs & local scratch
+*.log
+.claude-*.log
+.claude-*.pid
+
+# OS
+.DS_Store
+Thumbs.db

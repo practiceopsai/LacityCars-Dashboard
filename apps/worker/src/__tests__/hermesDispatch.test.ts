@@ -1,0 +1,154 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Job } from "bullmq";
+import type { Redis } from "ioredis";
+import type { PrismaClient } from "@lacity/database";
+import type { WorkerConfig } from "../config";
+import { createHermesProcessor } from "../processors/hermesDispatch";
+import type { HermesJobData } from "../queues";
+
+vi.mock("../hermesClient", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return { ...actual, triggerHermes: vi.fn() };
+});
+vi.mock("../publish", () => ({ publishVehicle: vi.fn() }));
+vi.mock("@lacity/database", () => ({ transitionVehicle: vi.fn() }));
+
+import { triggerHermes } from "../hermesClient";
+import { publishVehicle } from "../publish";
+
+const config = {
+  PUBLIC_API_URL: "https://api.example.com/",
+  HERMES_ENDPOINT: "https://hermes.example.com/trigger",
+} as WorkerConfig;
+
+const store = {
+  code: "LAC",
+  name: "LA City Cars",
+  autosoftInstance: "lacity",
+  stockPrefix: "LC",
+  internalCharges: [{ label: "Detail", amount: 150 }],
+  chargesTotal: 150,
+};
+
+function makeVehicle(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "veh-1",
+    vin: "1HGCM82633A004352",
+    model: "Accord",
+    stockNumber: "LC1001",
+    status: "READY",
+    dispatchNonce: 2,
+    freightAmount: 425.5,
+    freightEvidence: { loadId: "L-9" },
+    store,
+    corrections: [],
+    ...overrides,
+  };
+}
+
+function makePrisma(vehicle: unknown, claimCount: number) {
+  return {
+    vehicle: {
+      findUnique: vi.fn().mockResolvedValue(vehicle),
+      findUniqueOrThrow: vi.fn().mockResolvedValue(vehicle),
+      updateMany: vi.fn().mockResolvedValue({ count: claimCount }),
+    },
+    vehicleEvent: {
+      create: vi.fn().mockResolvedValue({}),
+    },
+  };
+}
+
+function makeJob(): Job<HermesJobData> {
+  return { data: { vehicleId: "veh-1" }, opts: { attempts: 5 }, attemptsMade: 0 } as unknown as Job<HermesJobData>;
+}
+
+const publisher = {} as Redis;
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+describe("createHermesProcessor", () => {
+  it("drops jobs for unknown vehicles without claiming", async () => {
+    const prisma = makePrisma(null, 0);
+    const processor = createHermesProcessor({
+      prisma: prisma as unknown as PrismaClient,
+      config,
+      publisher,
+    });
+
+    await processor(makeJob());
+
+    expect(prisma.vehicle.updateMany).not.toHaveBeenCalled();
+    expect(triggerHermes).not.toHaveBeenCalled();
+  });
+
+  it("skips dispatch when the idempotent claim matches zero rows", async () => {
+    const prisma = makePrisma(makeVehicle({ status: "STOCKED" }), 0);
+    const processor = createHermesProcessor({
+      prisma: prisma as unknown as PrismaClient,
+      config,
+      publisher,
+    });
+
+    await processor(makeJob());
+
+    expect(prisma.vehicle.updateMany).toHaveBeenCalledOnce();
+    expect(triggerHermes).not.toHaveBeenCalled();
+    expect(publishVehicle).not.toHaveBeenCalled();
+  });
+
+  it("claims, triggers Hermes with callback URL and freight evidence, then publishes", async () => {
+    const prisma = makePrisma(makeVehicle(), 1);
+    const processor = createHermesProcessor({
+      prisma: prisma as unknown as PrismaClient,
+      config,
+      publisher,
+    });
+
+    await processor(makeJob());
+
+    expect(triggerHermes).toHaveBeenCalledOnce();
+    expect(triggerHermes).toHaveBeenCalledWith(
+      config,
+      expect.objectContaining({
+        request_id: "veh-1:2",
+        callback_url: "https://api.example.com/api/webhooks/hermes",
+        freight: { amount: 425.5, evidence: { loadId: "L-9" } },
+        store: expect.objectContaining({ code: "LAC" }),
+      }),
+    );
+
+    expect(prisma.vehicleEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ type: "HERMES_TRIGGERED" }),
+      }),
+    );
+    expect(publishVehicle).toHaveBeenCalledOnce();
+  });
+
+  it("releases the claim and rethrows when the Hermes trigger fails", async () => {
+    const prisma = makePrisma(makeVehicle(), 1);
+    vi.mocked(triggerHermes).mockRejectedValueOnce(new Error("connect ECONNREFUSED"));
+    const processor = createHermesProcessor({
+      prisma: prisma as unknown as PrismaClient,
+      config,
+      publisher,
+    });
+
+    await expect(processor(makeJob())).rejects.toThrow("ECONNREFUSED");
+
+    // First updateMany claims; second releases the claim for the BullMQ retry.
+    expect(prisma.vehicle.updateMany).toHaveBeenCalledTimes(2);
+    expect(prisma.vehicle.updateMany).toHaveBeenNthCalledWith(2, {
+      where: { id: "veh-1", status: "READY", hermesRequestId: "veh-1:2" },
+      data: { hermesDispatchedAt: null },
+    });
+    expect(prisma.vehicleEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ type: "HERMES_TRIGGER_FAILED" }),
+      }),
+    );
+  });
+});

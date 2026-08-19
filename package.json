@@ -1,0 +1,27 @@
+{
+  "name": "lacitycars-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.12.3",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "eslint .",
+    "test": "pnpm -r --workspace-concurrency=1 run test",
+    "db:generate": "pnpm --filter @lacity/database generate",
+    "db:push": "pnpm --filter @lacity/database db:push",
+    "db:seed": "pnpm --filter @lacity/database db:seed",
+    "dev:api": "pnpm --filter @lacity/api dev",
+    "dev:worker": "pnpm --filter @lacity/worker dev",
+    "dev:web": "pnpm --filter @lacity/web dev"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "eslint": "^9.24.0",
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.30.0"
+  }
+}
