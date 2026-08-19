@@ -16,6 +16,16 @@ export interface WorkerQueues {
   close: () => Promise<void>;
 }
 
+/** BullMQ custom job IDs cannot contain colons. */
+export function freightJobId(vehicleId: string, nonce: number, attempt: number): string {
+  return `freight-${vehicleId}-${nonce}-${attempt}`;
+}
+
+/** BullMQ custom job IDs cannot contain colons. */
+export function hermesJobId(vehicleId: string, nonce: number): string {
+  return `hermes-${vehicleId}-${nonce}`;
+}
+
 export function createWorkerQueues(redisUrl: string): WorkerQueues {
   const connection = new Redis(redisUrl, { maxRetriesPerRequest: null });
   const freight = new Queue<FreightJobData>(FREIGHT_QUEUE, { connection });
@@ -40,7 +50,7 @@ export async function enqueueFreightCheck(
     "check",
     { vehicleId },
     {
-      jobId: `freight:${vehicleId}:${opts.nonce}:${opts.attempt}`,
+      jobId: freightJobId(vehicleId, opts.nonce, opts.attempt),
       delay: opts.delayMs ?? 0,
       removeOnComplete: 1000,
       removeOnFail: 1000,
@@ -57,7 +67,7 @@ export async function enqueueHermesDispatch(
     "dispatch",
     { vehicleId },
     {
-      jobId: `hermes:${vehicleId}:${nonce}`,
+      jobId: hermesJobId(vehicleId, nonce),
       attempts: 5,
       backoff: { type: "exponential", delay: 30_000 },
       removeOnComplete: 1000,
