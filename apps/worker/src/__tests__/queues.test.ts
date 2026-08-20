@@ -37,12 +37,12 @@ describe("queue job IDs", () => {
     await enqueueHermesDispatch(queues, vehicleId, 4);
     expect(queues.freight.add).toHaveBeenCalledWith(
       "check",
-      { vehicleId },
+      { vehicleId, nonce: 2, attempt: 3 },
       expect.objectContaining({ jobId: `freight-${vehicleId}-2-3` }),
     );
     expect(queues.hermes.add).toHaveBeenCalledWith(
       "dispatch",
-      { vehicleId },
+      { vehicleId, nonce: 4 },
       expect.objectContaining({ jobId: `hermes-${vehicleId}-4` }),
     );
   });

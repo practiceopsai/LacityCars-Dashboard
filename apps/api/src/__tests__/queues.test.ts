@@ -36,7 +36,7 @@ describe("queue job IDs", () => {
     await enqueueFreightCheck(queues, vehicleId, { nonce: 2, attempt: 3 });
     expect(queues.freight.add).toHaveBeenCalledWith(
       "check",
-      { vehicleId },
+      { vehicleId, nonce: 2, attempt: 3 },
       expect.objectContaining({ jobId: `freight-${vehicleId}-2-3` }),
     );
   });
@@ -46,8 +46,21 @@ describe("queue job IDs", () => {
     await enqueueHermesDispatch(queues, vehicleId, 4);
     expect(queues.hermes.add).toHaveBeenCalledWith(
       "dispatch",
-      { vehicleId },
+      { vehicleId, nonce: 4 },
       expect.objectContaining({ jobId: `hermes-${vehicleId}-4` }),
     );
+  });
+
+  it("delays Hermes until the scheduled boundary", async () => {
+    const queues = mockQueues();
+    const scheduled = new Date(Date.now() + 60_000);
+    await enqueueHermesDispatch(queues, vehicleId, 5, scheduled);
+    expect(queues.hermes.add).toHaveBeenCalledWith(
+      "dispatch",
+      { vehicleId, nonce: 5 },
+      expect.objectContaining({ delay: expect.any(Number) }),
+    );
+    const options = vi.mocked(queues.hermes.add).mock.calls[0]![2]!;
+    expect(options.delay).toBeGreaterThan(50_000);
   });
 });

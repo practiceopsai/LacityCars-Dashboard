@@ -7,6 +7,7 @@ export const IntakeVehicleSchema = z.object({
   vin: z.string().trim().min(1, "VIN is required"),
   model: z.string().trim().min(1, "Model is required").max(120),
   stockNumber: z.string().trim().max(32).optional(),
+  scheduledAt: z.string().datetime({ offset: true }),
 });
 export type IntakeVehicle = z.infer<typeof IntakeVehicleSchema>;
 
@@ -74,8 +75,14 @@ export type StoreUpsert = z.infer<typeof StoreUpsertSchema>;
 export const RetryRequestSchema = z.object({
   note: z.string().trim().min(5, "A correction/note of at least 5 characters is required").max(2000),
   corrections: z.record(z.string().trim().max(500)).optional(),
+  scheduledAt: z.string().datetime({ offset: true }).optional(),
 });
 export type RetryRequest = z.infer<typeof RetryRequestSchema>;
+
+export const ScheduleRequestSchema = z.object({
+  scheduledAt: z.string().datetime({ offset: true }),
+});
+export type ScheduleRequest = z.infer<typeof ScheduleRequestSchema>;
 
 export const CorrectionRequestSchema = z.object({
   note: z.string().trim().min(3).max(2000),
@@ -87,6 +94,11 @@ export type CorrectionRequest = z.infer<typeof CorrectionRequestSchema>;
 export const HermesTriggerPayloadSchema = z.object({
   request_id: z.string(),
   callback_url: z.string().url(),
+  schedule: z.object({
+    starts_at: z.string().datetime({ offset: true }),
+    eastern: z.string(),
+    pacific: z.string(),
+  }),
   store: z.object({
     code: z.string(),
     name: z.string(),

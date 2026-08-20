@@ -40,6 +40,7 @@ function makeVehicle(overrides: Record<string, unknown> = {}) {
     stockNumber: "LC1001",
     status: "READY",
     dispatchNonce: 2,
+    scheduledStartAt: new Date("2020-01-01T00:00:00.000Z"),
     freightAmount: 425.5,
     freightEvidence: { loadId: "L-9" },
     store,
@@ -64,7 +65,7 @@ function makePrisma(vehicle: unknown, claimCount: number) {
 
 function makeJob(): Job<HermesJobData> {
   return {
-    data: { vehicleId: "veh-1" },
+    data: { vehicleId: "veh-1", nonce: 2 },
     opts: { attempts: 5 },
     attemptsMade: 0,
     moveToDelayed: vi.fn().mockResolvedValue(undefined),
@@ -127,6 +128,37 @@ describe("createHermesProcessor", () => {
     expect(triggerHermes).not.toHaveBeenCalled();
   });
 
+  it("does not claim or trigger a vehicle before its scheduled start", async () => {
+    const scheduledStartAt = new Date(Date.now() + 60_000);
+    const prisma = makePrisma(makeVehicle({ scheduledStartAt }), 1);
+    const job = makeJob();
+    const processor = createHermesProcessor({
+      prisma: prisma as unknown as PrismaClient,
+      config,
+      publisher,
+    });
+
+    await expect(processor(job, "worker-token")).rejects.toBeInstanceOf(DelayedError);
+
+    expect(job.moveToDelayed).toHaveBeenCalledWith(scheduledStartAt.getTime(), "worker-token");
+    expect(prisma.vehicle.updateMany).not.toHaveBeenCalled();
+    expect(triggerHermes).not.toHaveBeenCalled();
+  });
+
+  it("drops a superseded scheduled job by dispatch nonce", async () => {
+    const prisma = makePrisma(makeVehicle({ dispatchNonce: 3 }), 1);
+    const processor = createHermesProcessor({
+      prisma: prisma as unknown as PrismaClient,
+      config,
+      publisher,
+    });
+
+    await processor(makeJob());
+
+    expect(prisma.vehicle.updateMany).not.toHaveBeenCalled();
+    expect(triggerHermes).not.toHaveBeenCalled();
+  });
+
   it("claims, triggers Hermes with callback URL and freight evidence, then publishes", async () => {
     const prisma = makePrisma(makeVehicle(), 1);
     const processor = createHermesProcessor({
@@ -144,6 +176,7 @@ describe("createHermesProcessor", () => {
         request_id: "veh-1:2",
         callback_url: "https://api.example.com/api/webhooks/hermes",
         freight: { amount: 425.5, evidence: { loadId: "L-9" } },
+        schedule: expect.objectContaining({ starts_at: "2020-01-01T00:00:00.000Z" }),
         store: expect.objectContaining({ code: "LAC" }),
       }),
     );

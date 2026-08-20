@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { validateVin } from "@lacity/shared";
+import {
+  EASTERN_TIME_ZONE,
+  PACIFIC_TIME_ZONE,
+  stockingScheduleLabels,
+  validateVin,
+  zonedLocalToIso,
+  type StockingTimeZone,
+} from "@lacity/shared";
 import { api, type IntakeResultDto, type StoreDto } from "@/lib/api";
 import { mapCsvRows, parseCsv, type CsvVehicleRow } from "@/lib/csv";
 
@@ -11,6 +18,8 @@ export default function IntakePage() {
   const [vin, setVin] = useState("");
   const [model, setModel] = useState("");
   const [stockNumber, setStockNumber] = useState("");
+  const [scheduleLocal, setScheduleLocal] = useState("");
+  const [scheduleZone, setScheduleZone] = useState<StockingTimeZone>(EASTERN_TIME_ZONE);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
 
@@ -28,10 +37,20 @@ export default function IntakePage() {
   }, []);
 
   const vinCheck = useMemo(() => (vin.trim() ? validateVin(vin) : null), [vin]);
+  const schedule = useMemo(() => {
+    if (!scheduleLocal) return null;
+    try {
+      const iso = zonedLocalToIso(scheduleLocal, scheduleZone);
+      if (Date.parse(iso) <= Date.now()) return { ok: false, error: "Choose a future start time." } as const;
+      return { ok: true, iso, labels: stockingScheduleLabels(iso) } as const;
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : "Invalid start time." } as const;
+    }
+  }, [scheduleLocal, scheduleZone]);
 
   async function submitSingle(e: React.FormEvent) {
     e.preventDefault();
-    if (!vinCheck?.ok) return;
+    if (!vinCheck?.ok || !schedule?.ok) return;
     setBusy(true);
     setMessage(null);
     try {
@@ -41,6 +60,7 @@ export default function IntakePage() {
           store,
           vin: vinCheck.vin,
           model: model.trim(),
+          scheduledAt: schedule.iso,
           ...(stockNumber.trim() ? { stockNumber: stockNumber.trim() } : {}),
         },
       });
@@ -84,7 +104,7 @@ export default function IntakePage() {
   const validCsvRows = (csvRows ?? []).filter((r) => r.errors.length === 0);
 
   async function submitCsv() {
-    if (validCsvRows.length === 0) return;
+    if (validCsvRows.length === 0 || !schedule?.ok) return;
     setCsvBusy(true);
     setCsvResults(null);
     try {
@@ -94,6 +114,7 @@ export default function IntakePage() {
           store: r.store,
           vin: r.vin,
           model: r.model,
+          scheduledAt: schedule.iso,
           ...(r.stockNumber ? { stockNumber: r.stockNumber } : {}),
         })),
       });
@@ -119,6 +140,44 @@ export default function IntakePage() {
           {message.text}
         </div>
       ) : null}
+
+      <div className="panel" style={{ marginBottom: 16 }}>
+        <h2>Stocking start time</h2>
+        <p className="field-hint">
+          Required for every submission. Freight may be prepared earlier, but Hermes cannot open the
+          stock sheet or shared AutoSoft account before this time. One time applies to the whole CSV batch.
+        </p>
+        <div className="grid-2">
+          <label className="field">
+            <span>Date and time</span>
+            <input
+              type="datetime-local"
+              value={scheduleLocal}
+              onChange={(e) => setScheduleLocal(e.target.value)}
+              required
+            />
+          </label>
+          <label className="field">
+            <span>Time zone entered</span>
+            <select
+              value={scheduleZone}
+              onChange={(e) => setScheduleZone(e.target.value as StockingTimeZone)}
+            >
+              <option value={EASTERN_TIME_ZONE}>Eastern (ET)</option>
+              <option value={PACIFIC_TIME_ZONE}>Pacific (PT)</option>
+            </select>
+          </label>
+        </div>
+        {schedule?.ok ? (
+          <p className="field-hint">
+            Eastern: {schedule.labels.eastern} · Pacific: {schedule.labels.pacific}
+          </p>
+        ) : schedule ? (
+          <p className="field-error">{schedule.error}</p>
+        ) : (
+          <p className="field-hint">The equivalent Eastern and Pacific times will appear here.</p>
+        )}
+      </div>
 
       <div className="grid-2">
         <form className="panel" onSubmit={submitSingle}>
@@ -173,7 +232,7 @@ export default function IntakePage() {
           <button
             type="submit"
             className="btn btn-primary"
-            disabled={busy || !vinCheck?.ok || !model.trim() || !store}
+            disabled={busy || !vinCheck?.ok || !model.trim() || !store || !schedule?.ok}
           >
             {busy ? "Submitting…" : "Submit vehicle"}
           </button>
@@ -235,7 +294,7 @@ export default function IntakePage() {
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={csvBusy || validCsvRows.length === 0}
+                disabled={csvBusy || validCsvRows.length === 0 || !schedule?.ok}
                 onClick={submitCsv}
               >
                 {csvBusy ? "Submitting…" : `Submit ${validCsvRows.length} vehicles`}

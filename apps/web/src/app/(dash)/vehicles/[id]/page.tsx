@@ -2,6 +2,13 @@
 
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import {
+  EASTERN_TIME_ZONE,
+  PACIFIC_TIME_ZONE,
+  formatStockingTime,
+  zonedLocalToIso,
+  type StockingTimeZone,
+} from "@lacity/shared";
 import { api, ApiError, type VehicleDetailDto } from "@/lib/api";
 import { fmtDateTime, fmtMoney, timeUntil } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -29,6 +36,9 @@ export default function VehicleDetailPage() {
   const [fixModel, setFixModel] = useState("");
   const [fixStock, setFixStock] = useState("");
   const [busy, setBusy] = useState<"retry" | "correction" | null>(null);
+  const [scheduleBusy, setScheduleBusy] = useState(false);
+  const [scheduleLocal, setScheduleLocal] = useState("");
+  const [scheduleZone, setScheduleZone] = useState<StockingTimeZone>(EASTERN_TIME_ZONE);
   const [confirmRetry, setConfirmRetry] = useState(false);
   const [flash, setFlash] = useState<{ kind: "success" | "error"; text: string } | null>(null);
 
@@ -100,6 +110,26 @@ export default function VehicleDetailPage() {
     }
   }
 
+  async function submitSchedule() {
+    if (!scheduleLocal) return;
+    setScheduleBusy(true);
+    setFlash(null);
+    try {
+      const scheduledAt = zonedLocalToIso(scheduleLocal, scheduleZone);
+      await api(`/api/vehicles/${id}/schedule`, {
+        method: "POST",
+        body: { scheduledAt },
+      });
+      setFlash({ kind: "success", text: "Stocking time updated." });
+      setScheduleLocal("");
+      await load();
+    } catch (err) {
+      setFlash({ kind: "error", text: err instanceof Error ? err.message : "Reschedule failed." });
+    } finally {
+      setScheduleBusy(false);
+    }
+  }
+
   if (error) return <ErrorState message={error} onRetry={() => void load()} />;
   if (!vehicle) return <LoadingState label="Loading vehicle…" />;
 
@@ -136,6 +166,56 @@ export default function VehicleDetailPage() {
 
       <div className="grid-2">
         <div>
+          <div className="panel">
+            <h2>Stocking schedule</h2>
+            <dl className="kv">
+              <dt>Eastern</dt>
+              <dd>
+                {vehicle.scheduledStartAt
+                  ? formatStockingTime(vehicle.scheduledStartAt, EASTERN_TIME_ZONE)
+                  : "Not scheduled"}
+              </dd>
+              <dt>Pacific</dt>
+              <dd>
+                {vehicle.scheduledStartAt
+                  ? formatStockingTime(vehicle.scheduledStartAt, PACIFIC_TIME_ZONE)
+                  : "Not scheduled"}
+              </dd>
+            </dl>
+            {["PENDING", "AWAITING_FREIGHT", "READY"].includes(vehicle.status) ? (
+              <>
+                <div className="grid-2" style={{ marginTop: 12 }}>
+                  <label className="field">
+                    <span>New date and time</span>
+                    <input
+                      type="datetime-local"
+                      value={scheduleLocal}
+                      onChange={(e) => setScheduleLocal(e.target.value)}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Time entered in</span>
+                    <select
+                      value={scheduleZone}
+                      onChange={(e) => setScheduleZone(e.target.value as StockingTimeZone)}
+                    >
+                      <option value={EASTERN_TIME_ZONE}>Eastern</option>
+                      <option value={PACIFIC_TIME_ZONE}>Pacific</option>
+                    </select>
+                  </label>
+                </div>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={!scheduleLocal || scheduleBusy}
+                  onClick={submitSchedule}
+                >
+                  {scheduleBusy ? "Saving…" : "Reschedule"}
+                </button>
+              </>
+            ) : null}
+          </div>
+
           <div className="panel">
             <h2>Freight</h2>
             {vehicle.freightAmount !== null && evidence ? (

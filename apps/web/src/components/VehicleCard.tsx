@@ -1,6 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import {
+  EASTERN_TIME_ZONE,
+  PACIFIC_TIME_ZONE,
+  formatStockingTime,
+} from "@lacity/shared";
 import type { VehicleDto } from "@/lib/api";
 import { fmtMoney, timeUntil } from "@/lib/format";
 import { StatusBadge } from "./StatusBadge";
@@ -18,6 +23,12 @@ export function VehicleCard({ vehicle }: { vehicle: VehicleDto }) {
       </div>
       <VinDisplay vin={vehicle.vin} masked={vehicle.vinMasked} />
       <div className="vcard-meta">
+        {vehicle.scheduledStartAt ? (
+          <span>
+            Starts {formatStockingTime(vehicle.scheduledStartAt, EASTERN_TIME_ZONE)} /{" "}
+            {formatStockingTime(vehicle.scheduledStartAt, PACIFIC_TIME_ZONE)}
+          </span>
+        ) : null}
         {vehicle.stockNumber ? <span>Stock {vehicle.stockNumber}</span> : null}
         {vehicle.freightAmount !== null ? (
           <span>Freight {fmtMoney(vehicle.freightAmount)}</span>

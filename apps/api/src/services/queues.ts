@@ -4,10 +4,13 @@ import { FREIGHT_QUEUE, HERMES_QUEUE } from "@lacity/shared";
 
 export interface FreightJobData {
   vehicleId: string;
+  nonce: number;
+  attempt: number;
 }
 
 export interface HermesJobData {
   vehicleId: string;
+  nonce: number;
 }
 
 export interface Queues {
@@ -50,7 +53,7 @@ export async function enqueueFreightCheck(
 ): Promise<void> {
   await queues.freight.add(
     "check",
-    { vehicleId },
+    { vehicleId, nonce: opts.nonce, attempt: opts.attempt },
     {
       jobId: freightJobId(vehicleId, opts.nonce, opts.attempt),
       delay: opts.delayMs ?? 0,
@@ -65,12 +68,15 @@ export async function enqueueHermesDispatch(
   queues: Queues,
   vehicleId: string,
   nonce: number,
+  scheduledStartAt?: Date | null,
 ): Promise<void> {
+  const delay = scheduledStartAt ? Math.max(0, scheduledStartAt.getTime() - Date.now()) : 0;
   await queues.hermes.add(
     "dispatch",
-    { vehicleId },
+    { vehicleId, nonce },
     {
       jobId: hermesJobId(vehicleId, nonce),
+      delay,
       attempts: 5,
       backoff: { type: "exponential", delay: 30_000 },
       removeOnComplete: 1000,

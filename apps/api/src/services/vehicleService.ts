@@ -32,6 +32,7 @@ export function serializeVehicle(vehicle: VehicleWithStore) {
     freightEvidence: vehicle.freightEvidence,
     freightAttempts: vehicle.freightAttempts,
     nextFreightCheckAt: vehicle.nextFreightCheckAt?.toISOString() ?? null,
+    scheduledStartAt: vehicle.scheduledStartAt?.toISOString() ?? null,
     acv: num(vehicle.acv),
     finalTotal: num(vehicle.finalTotal),
     ragCommitId: vehicle.ragCommitId,
@@ -89,13 +90,17 @@ export interface IntakeItemResult {
  */
 export async function intakeVehicle(
   prisma: PrismaClient,
-  input: { store: string; vin: string; model: string; stockNumber?: string },
+  input: { store: string; vin: string; model: string; stockNumber?: string; scheduledAt: string },
 ): Promise<IntakeItemResult> {
   const vinCheck = validateVin(input.vin);
   if (!vinCheck.ok || !vinCheck.vin) {
     return { vin: input.vin, ok: false, errors: vinCheck.errors };
   }
   const vin = vinCheck.vin;
+  const scheduledStartAt = new Date(input.scheduledAt);
+  if (scheduledStartAt.getTime() <= Date.now()) {
+    return { vin, ok: false, errors: ["Scheduled stocking time must be in the future"] };
+  }
 
   const store = await resolveStore(prisma, input.store);
   if (!store) {
@@ -116,13 +121,18 @@ export async function intakeVehicle(
       vin,
       model: input.model,
       stockNumber: input.stockNumber ?? null,
+      scheduledStartAt,
       status: "PENDING",
       events: {
         create: {
           type: "INTAKE",
           toStatus: "PENDING",
-          message: `Intake accepted for ${store.name}`,
-          payload: { model: input.model, stockNumber: input.stockNumber ?? null },
+          message: `Intake accepted for ${store.name}; Hermes scheduled for ${scheduledStartAt.toISOString()}`,
+          payload: {
+            model: input.model,
+            stockNumber: input.stockNumber ?? null,
+            scheduledStartAt: scheduledStartAt.toISOString(),
+          },
         },
       },
     },

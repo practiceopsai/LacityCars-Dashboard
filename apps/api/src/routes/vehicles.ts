@@ -6,6 +6,7 @@ import {
   IntakeRequestSchema,
   RETRYABLE_STATUSES,
   RetryRequestSchema,
+  ScheduleRequestSchema,
   CorrectionRequestSchema,
   isVehicleStatus,
   normalizeVin,
@@ -61,6 +62,14 @@ function csvCell(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return "";
   const text = String(value);
   return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function futureSchedule(value: string): Date {
+  const scheduledAt = new Date(value);
+  if (scheduledAt.getTime() <= Date.now()) {
+    throw new HttpError(400, "SCHEDULE_IN_PAST", "Scheduled stocking time must be in the future");
+  }
+  return scheduledAt;
 }
 
 export function vehiclesRouter(
@@ -237,6 +246,12 @@ export function vehiclesRouter(
       });
 
       const nonce = vehicle.dispatchNonce + 1;
+      const scheduledStartAt = body.scheduledAt
+        ? futureSchedule(body.scheduledAt)
+        : vehicle.scheduledStartAt;
+      if (!scheduledStartAt) {
+        throw new HttpError(400, "SCHEDULE_REQUIRED", "Assign a stocking time before retrying");
+      }
       const hasFreight = vehicle.freightAmount !== null;
       const target: VehicleStatus = hasFreight ? "READY" : "AWAITING_FREIGHT";
       const updated = await transitionVehicle(prisma, vehicle.id, target, {
@@ -245,18 +260,74 @@ export function vehiclesRouter(
         payload: { corrections: body.corrections ?? null },
         data: {
           dispatchNonce: nonce,
+          scheduledStartAt,
           hermesDispatchedAt: null,
           failureReason: null,
           ...(hasFreight ? {} : { freightAttempts: 0, nextFreightCheckAt: new Date() }),
         },
       });
       if (hasFreight) {
-        await enqueueHermesDispatch(queues, vehicle.id, nonce);
+        await enqueueHermesDispatch(queues, vehicle.id, nonce, scheduledStartAt);
       } else {
         await enqueueFreightCheck(queues, vehicle.id, { nonce, attempt: 0 });
       }
       await publishVehicleUpdate(publisher, updateMessageFor(updated));
       res.json({ vehicle: serializeVehicle(updated), requeuedAs: target });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /** POST /api/vehicles/:id/schedule — reschedule queued work without touching live systems. */
+  router.post("/:id/schedule", guards.limiter, guards.csrf, async (req, res, next) => {
+    try {
+      const body = ScheduleRequestSchema.parse(req.body);
+      const scheduledStartAt = futureSchedule(body.scheduledAt);
+      const vehicle = await prisma.vehicle.findUnique({
+        where: { id: req.params.id },
+        include: { store: true },
+      });
+      if (!vehicle) throw new HttpError(404, "VEHICLE_NOT_FOUND", "Vehicle not found");
+      if (!["PENDING", "AWAITING_FREIGHT", "READY"].includes(vehicle.status)) {
+        throw new HttpError(
+          409,
+          "VEHICLE_NOT_SCHEDULABLE",
+          `Vehicles in ${vehicle.status} cannot be rescheduled`,
+        );
+      }
+
+      const nonce = vehicle.dispatchNonce + 1;
+      const updated = await prisma.$transaction(async (tx) => {
+        const changed = await tx.vehicle.update({
+          where: { id: vehicle.id },
+          data: {
+            scheduledStartAt,
+            dispatchNonce: nonce,
+            hermesDispatchedAt: null,
+            hermesRequestId: null,
+          },
+          include: { store: true },
+        });
+        await tx.vehicleEvent.create({
+          data: {
+            vehicleId: vehicle.id,
+            type: "STOCKING_RESCHEDULED",
+            fromStatus: vehicle.status,
+            toStatus: vehicle.status,
+            message: `Hermes start rescheduled for ${scheduledStartAt.toISOString()}`,
+            payload: { scheduledStartAt: scheduledStartAt.toISOString(), dispatchNonce: nonce },
+          },
+        });
+        return changed;
+      });
+
+      if (vehicle.status === "READY") {
+        await enqueueHermesDispatch(queues, vehicle.id, nonce, scheduledStartAt);
+      } else {
+        await enqueueFreightCheck(queues, vehicle.id, { nonce, attempt: vehicle.freightAttempts });
+      }
+      await publishVehicleUpdate(publisher, updateMessageFor(updated));
+      res.json({ vehicle: serializeVehicle(updated) });
     } catch (err) {
       next(err);
     }

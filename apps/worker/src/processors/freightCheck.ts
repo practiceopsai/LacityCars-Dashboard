@@ -29,13 +29,17 @@ export function createFreightProcessor(deps: FreightDeps) {
   const { prisma, config, publisher, queues } = deps;
 
   return async (job: Job<FreightJobData>): Promise<void> => {
-    const { vehicleId } = job.data;
+    const { vehicleId, nonce } = job.data;
     const vehicle = await prisma.vehicle.findUnique({
       where: { id: vehicleId },
       include: { store: true },
     });
     if (!vehicle) {
       logger.warn({ vehicleId }, "Freight check for unknown vehicle; dropping");
+      return;
+    }
+    if (nonce !== vehicle.dispatchNonce) {
+      logger.info({ vehicleId, jobNonce: nonce, currentNonce: vehicle.dispatchNonce }, "Stale freight job dropped");
       return;
     }
     if (!CHECKABLE_STATUSES.includes(vehicle.status as VehicleStatus)) {
@@ -92,7 +96,12 @@ export function createFreightProcessor(deps: FreightDeps) {
           failureReason: null,
         },
       });
-      await enqueueHermesDispatch(queues, vehicleId, updated.dispatchNonce);
+      await enqueueHermesDispatch(
+        queues,
+        vehicleId,
+        updated.dispatchNonce,
+        updated.scheduledStartAt,
+      );
       await publishVehicle(publisher, updated);
       logger.info({ vehicleId, amount: result.amount }, "Freight verified; Hermes dispatch queued");
       return;

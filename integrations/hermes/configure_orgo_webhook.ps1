@@ -105,11 +105,24 @@ $contractBlock = @'
 - The callback's `stock_number`, ACV, freight, final total, source/run summary, and RAG commit must come from verified run evidence. Any safety gate that blocks posting must be returned as `FAILED` with the exact reason.
 '@
 
+$scheduleBlock = @'
+## Scheduled stocking boundary
+
+- Every dashboard `vehicle.ready` payload includes `schedule.starts_at` as an ISO 8601 instant plus Eastern and Pacific display labels. The UTC instant is authoritative; the labels are operator-readable context.
+- `schedule.starts_at` is a hard not-before boundary for all live stocking work because AutoSoft is shared. Independently compare the current time with it before opening or changing the stock sheet, NextGear, AutoSoft, or another live stocking system.
+- If a trigger arrives early, fail closed: make no live-system changes and report the premature trigger. Never wait inside or hold open the shared AutoSoft session until the scheduled time.
+- A scheduled time does not permit concurrency. Continue to process one dashboard vehicle at a time, and let later scheduled vehicles remain queued while another run owns the desktop.
+- Store scheduling instants in UTC and show both America/New_York (Eastern) and America/Los_Angeles (Pacific), using their date-specific daylight-saving abbreviations.
+'@
+
 Append-Once (Join-Path $RagRoot '.hermes.md') '## Dashboard-triggered stocking runs' $contractBlock
 Append-Once (Join-Path $HermesHome 'skills\operations\vehicle-stock-in\SKILL.md') '## Dashboard-triggered stocking runs' $contractBlock
+Append-Once (Join-Path $RagRoot '.hermes.md') '## Scheduled stocking boundary' $scheduleBlock
+Append-Once (Join-Path $HermesHome 'skills\operations\vehicle-stock-in\SKILL.md') '## Scheduled stocking boundary' $scheduleBlock
 $profileSkill = Join-Path $HermesHome 'profiles\vehiclestocking\skills\operations\vehicle-stock-in\SKILL.md'
 if (Test-Path -LiteralPath $profileSkill) {
     Append-Once $profileSkill '## Dashboard-triggered stocking runs' $contractBlock
+    Append-Once $profileSkill '## Scheduled stocking boundary' $scheduleBlock
 }
 
 & $hermes config check | Out-Null

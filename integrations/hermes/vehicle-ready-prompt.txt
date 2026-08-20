@@ -15,6 +15,11 @@ Proposed stock number: {vehicle.stock_number}
 Freight amount: {freight.amount}
 Freight evidence: {freight.evidence}
 Corrections: {corrections}
+Authorized start (UTC): {schedule.starts_at}
+Authorized start (Eastern): {schedule.eastern}
+Authorized start (Pacific): {schedule.pacific}
+
+The authorized start is a hard not-before boundary because AutoSoft is a shared account. Compare current time with schedule.starts_at. If current time is earlier, do not open or modify the stock sheet, NextGear, AutoSoft, or any live stocking system; fail closed and report the premature trigger. The worker normally delays delivery until this boundary, but this independent check is mandatory. The schedule authorizes only this run and does not authorize concurrent AutoSoft sessions.
 
 Before touching a live system, start the mandatory RAG run and complete every preflight gate, including duplicate VIN, current store, authoritative NextGear/source, dispatch evidence, accounting balance, and exact VIN-field clearing. The dashboard freight evidence is authoritative input but must still pass the playbook's defensibility checks. Process no other dashboard vehicle during this run.
 

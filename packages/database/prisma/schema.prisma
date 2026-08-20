@@ -52,6 +52,9 @@ model Vehicle {
   /// Attempts made to find freight on the dispatch workbook.
   freightAttempts    Int            @default(0)
   nextFreightCheckAt DateTime?
+  /// Operator-designated earliest time Hermes may begin live stocking work.
+  /// Stored in UTC; UI renders both America/New_York and America/Los_Angeles.
+  scheduledStartAt   DateTime?
   /// Idempotency/concurrency guard for Hermes dispatch. Cleared to allow re-dispatch.
   hermesDispatchedAt DateTime?
   /// Monotonic nonce so operator retries produce fresh BullMQ job IDs.
@@ -66,6 +69,7 @@ model Vehicle {
 
   @@index([storeId, vin])
   @@index([status])
+  @@index([scheduledStartAt])
   @@index([vin])
 }
 

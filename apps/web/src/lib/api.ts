@@ -30,6 +30,7 @@ export interface VehicleDto {
   freightEvidence: Record<string, unknown> | null;
   freightAttempts: number;
   nextFreightCheckAt: string | null;
+  scheduledStartAt: string | null;
   acv: number | null;
   finalTotal: number | null;
   ragCommitId: string | null;

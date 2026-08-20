@@ -1,7 +1,11 @@
 import { DelayedError, type Job } from "bullmq";
 import type { Redis } from "ioredis";
 import { transitionVehicle, type PrismaClient } from "@lacity/database";
-import type { HermesTriggerPayload, InternalCharge } from "@lacity/shared";
+import {
+  stockingScheduleLabels,
+  type HermesTriggerPayload,
+  type InternalCharge,
+} from "@lacity/shared";
 import type { WorkerConfig } from "../config";
 import { HermesTriggerError, triggerHermes } from "../hermesClient";
 import { logger } from "../logger";
@@ -28,7 +32,7 @@ export function createHermesProcessor(deps: HermesDeps) {
   const { prisma, config, publisher } = deps;
 
   return async (job: Job<HermesJobData>, token?: string): Promise<void> => {
-    const { vehicleId } = job.data;
+    const { vehicleId, nonce } = job.data;
     const vehicle = await prisma.vehicle.findUnique({
       where: { id: vehicleId },
       include: { store: true, corrections: { orderBy: { createdAt: "asc" } } },
@@ -36,6 +40,28 @@ export function createHermesProcessor(deps: HermesDeps) {
     if (!vehicle) {
       logger.warn({ vehicleId }, "Hermes dispatch for unknown vehicle; dropping");
       return;
+    }
+    if (nonce !== vehicle.dispatchNonce) {
+      logger.info({ vehicleId, jobNonce: nonce, currentNonce: vehicle.dispatchNonce }, "Stale Hermes job dropped");
+      return;
+    }
+
+    if (!vehicle.scheduledStartAt) {
+      const updated = await transitionVehicle(prisma, vehicleId, "ACTION_REQUIRED", {
+        eventType: "SCHEDULE_MISSING",
+        message: "Hermes dispatch blocked because no stocking schedule was assigned",
+        data: { failureReason: "Missing scheduled stocking time" },
+      });
+      await publishVehicle(publisher, updated);
+      return;
+    }
+    if (vehicle.scheduledStartAt.getTime() > Date.now()) {
+      await job.moveToDelayed(vehicle.scheduledStartAt.getTime(), token);
+      logger.info(
+        { vehicleId, scheduledStartAt: vehicle.scheduledStartAt.toISOString() },
+        "Hermes dispatch held until scheduled time",
+      );
+      throw new DelayedError();
     }
 
     // Hermes webhook deliveries use independent sessions, so the gateway can
@@ -81,6 +107,10 @@ export function createHermesProcessor(deps: HermesDeps) {
     const payload: HermesTriggerPayload = {
       request_id: requestId,
       callback_url: `${config.PUBLIC_API_URL.replace(/\/$/, "")}/api/webhooks/hermes`,
+      schedule: {
+        starts_at: vehicle.scheduledStartAt.toISOString(),
+        ...stockingScheduleLabels(vehicle.scheduledStartAt),
+      },
       store: {
         code: vehicle.store.code,
         name: vehicle.store.name,

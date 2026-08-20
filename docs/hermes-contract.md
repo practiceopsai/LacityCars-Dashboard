@@ -44,6 +44,11 @@ the same signed body directly to `HERMES_ENDPOINT`.
     "model": "2022 Honda Accord EX-L",
     "stock_number": null
   },
+  "schedule": {
+    "starts_at": "2026-08-20T23:00:00.000Z",
+    "eastern": "Aug 20, 2026, 7:00 PM EDT",
+    "pacific": "Aug 20, 2026, 4:00 PM PDT"
+  },
   "freight": {
     "amount": 300,
     "evidence": {
@@ -72,6 +77,11 @@ the same signed body directly to `HERMES_ENDPOINT`.
   (5 attempts, exponential backoff), then the vehicle is marked `FAILED`.
 - The worker permits one active desktop run. Later READY vehicles remain
   delayed while another vehicle is `PROCESSING`.
+- `schedule.starts_at` is the authoritative UTC not-before boundary. The worker
+  creates a delayed job and rechecks the boundary immediately before dispatch;
+  Hermes independently checks it before touching any live system. Eastern and
+  Pacific labels are DST-aware operator displays. Scheduling never permits two
+  concurrent sessions on the shared AutoSoft account.
 - The dedicated `vehicle-stocking` route is loopback-only and HMAC-authenticated.
   It explicitly enables only the terminal, file, browser, computer-use, vision,
   skills, task, and memory toolsets required by the stocking playbook. Generic
