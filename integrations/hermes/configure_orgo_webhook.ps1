@@ -84,6 +84,10 @@ Set-ConfigValue 'platforms.webhook.extra.routes.vehicle-stocking.events' '["vehi
 Set-ConfigValue 'platforms.webhook.extra.routes.vehicle-stocking.secret' $triggerSecret
 Set-ConfigValue 'platforms.webhook.extra.routes.vehicle-stocking.prompt' $prompt
 Set-ConfigValue 'platforms.webhook.extra.routes.vehicle-stocking.skills' '["vehicle-stock-in"]'
+# Generic webhook routes are intentionally sandboxed by Hermes. This route is
+# loopback-only, HMAC-authenticated, and dedicated to an authorized stocking
+# job, so grant only the tools needed by the documented workflow.
+Set-ConfigValue 'platforms.webhook.extra.routes.vehicle-stocking.toolsets' '["terminal","file","browser","computer_use","vision","skills","todo","memory"]'
 Set-ConfigValue 'platforms.webhook.extra.routes.vehicle-stocking.deliver' 'log'
 Set-ConfigValue 'LACITY_DASHBOARD_CALLBACK_SECRET' $callbackSecret
 Set-DotEnvValue 'LACITY_DASHBOARD_CALLBACK_ORIGIN' $CallbackOrigin

@@ -72,6 +72,14 @@ the same signed body directly to `HERMES_ENDPOINT`.
   (5 attempts, exponential backoff), then the vehicle is marked `FAILED`.
 - The worker permits one active desktop run. Later READY vehicles remain
   delayed while another vehicle is `PROCESSING`.
+- The dedicated `vehicle-stocking` route is loopback-only and HMAC-authenticated.
+  It explicitly enables only the terminal, file, browser, computer-use, vision,
+  skills, task, and memory toolsets required by the stocking playbook. Generic
+  webhook routes remain restricted.
+- A watchdog marks a job `FAILED` if Hermes supplies no terminal callback within
+  90 minutes (configurable). This fail-closed recovery prevents an abandoned
+  `PROCESSING` row from blocking every later vehicle; an operator must verify
+  the live systems before using the audited retry action.
 
 ## 2. Callback (Hermes → API)
 

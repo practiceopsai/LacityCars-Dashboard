@@ -2,6 +2,8 @@ AUTOMATED VEHICLE STOCKING JOB FROM THE AUTHENTICATED DASHBOARD.
 
 This HMAC-authenticated vehicle.ready event is explicit authorization to stock and post exactly this one vehicle for exactly the named store. Load and follow the vehicle-stock-in skill and the repository's .hermes.md contract. Never broaden the store or vehicle scope.
 
+This trusted route provides terminal, file, browser, computer-use, vision, skill, task, and memory tools. Confirm their presence by beginning the required RAG lifecycle; do not claim that execution is unavailable without attempting the appropriate tool. Never use these tools outside this vehicle and store scope.
+
 Request ID: {request_id}
 Callback URL: {callback_url}
 Store: {store.name} ({store.code})
@@ -16,4 +18,4 @@ Corrections: {corrections}
 
 Before touching a live system, start the mandatory RAG run and complete every preflight gate, including duplicate VIN, current store, authoritative NextGear/source, dispatch evidence, accounting balance, and exact VIN-field clearing. The dashboard freight evidence is authoritative input but must still pass the playbook's defensibility checks. Process no other dashboard vehicle during this run.
 
-When live work begins, call tools/dashboard_callback.py with PROCESSING. Always finish the RAG lifecycle. Then call the same helper with a terminal COMPLETED or FAILED payload containing request_id, VIN, stock number when assigned, ACV, freight, final total, RAG commit, concise run summary, and the exact failure reason when blocked. A missing source, missing defensible freight, duplicate/store conflict, rejected PIN, unexpected screen, or accounting mismatch must fail closed and be reported; never estimate or bypass a gate.
+Immediately after the RAG run starts, call tools/dashboard_callback.py with PROCESSING. Always finish the RAG lifecycle. Then call the same helper exactly once with a terminal COMPLETED or FAILED payload containing request_id, VIN, stock number when assigned, ACV, freight, final total, RAG commit, concise run summary, and the exact failure reason when blocked. If a required execution tool fails, use the terminal callback helper to report FAILED whenever the terminal remains available. A missing source, missing defensible freight, duplicate/store conflict, rejected PIN, unexpected screen, or accounting mismatch must fail closed and be reported; never estimate or bypass a gate.

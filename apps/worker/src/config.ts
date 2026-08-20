@@ -22,6 +22,8 @@ const EnvSchema = z
     FREIGHT_BACKOFF_MAX_MS: z.coerce.number().int().min(1000).default(DEFAULT_FREIGHT_BACKOFF_MAX_MS),
     HERMES_TIMEOUT_MS: z.coerce.number().int().min(1000).default(30_000),
     HERMES_BUSY_DELAY_MS: z.coerce.number().int().min(5_000).default(30_000),
+    HERMES_PROCESSING_TIMEOUT_MS: z.coerce.number().int().min(60_000).default(5_400_000),
+    HERMES_WATCHDOG_INTERVAL_MS: z.coerce.number().int().min(10_000).default(60_000),
   })
   .superRefine((value, ctx) => {
     if (!value.DISPATCH_WORKBOOK_URL && !value.DISPATCH_WORKBOOK_PATH) {

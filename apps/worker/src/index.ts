@@ -7,6 +7,7 @@ import { logger } from "./logger";
 import { createFreightProcessor } from "./processors/freightCheck";
 import { createHermesProcessor } from "./processors/hermesDispatch";
 import { createWorkerQueues, type FreightJobData, type HermesJobData } from "./queues";
+import { recoverStaleProcessing } from "./staleProcessing";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -41,8 +42,20 @@ async function main(): Promise<void> {
 
   logger.info("Worker online: freight-check + hermes-dispatch");
 
+  const runWatchdog = (): void => {
+    void recoverStaleProcessing({
+      prisma,
+      publisher,
+      timeoutMs: config.HERMES_PROCESSING_TIMEOUT_MS,
+    }).catch((err) => logger.error({ err }, "Hermes processing watchdog failed"));
+  };
+  runWatchdog();
+  const watchdog = setInterval(runWatchdog, config.HERMES_WATCHDOG_INTERVAL_MS);
+  watchdog.unref();
+
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, "Shutting down worker");
+    clearInterval(watchdog);
     await freightWorker.close();
     await hermesWorker.close();
     await queues.close();
