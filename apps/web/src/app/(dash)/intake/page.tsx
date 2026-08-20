@@ -26,6 +26,8 @@ export default function IntakePage() {
   const [csvRows, setCsvRows] = useState<CsvVehicleRow[] | null>(null);
   const [csvResults, setCsvResults] = useState<IntakeResultDto | null>(null);
   const [csvBusy, setCsvBusy] = useState(false);
+  const [batchName, setBatchName] = useState("");
+  const [transportReference, setTransportReference] = useState("");
 
   useEffect(() => {
     api<{ items: StoreDto[] }>("/api/stores")
@@ -104,20 +106,31 @@ export default function IntakePage() {
   const validCsvRows = (csvRows ?? []).filter((r) => r.errors.length === 0);
 
   async function submitCsv() {
-    if (validCsvRows.length === 0 || !schedule?.ok) return;
+    if (validCsvRows.length === 0 || !schedule?.ok || (validCsvRows.length > 1 && !batchName.trim())) return;
     setCsvBusy(true);
     setCsvResults(null);
     try {
-      const result = await api<IntakeResultDto>("/api/vehicles/intake", {
+      const vehicles = validCsvRows.map((r) => ({
+        store: r.store,
+        vin: r.vin,
+        model: r.model,
+        ...(r.stockNumber ? { stockNumber: r.stockNumber } : {}),
+      }));
+      const result = await api<IntakeResultDto>(
+        validCsvRows.length > 1 ? "/api/batches/intake" : "/api/vehicles/intake",
+        {
         method: "POST",
-        body: validCsvRows.map((r) => ({
-          store: r.store,
-          vin: r.vin,
-          model: r.model,
-          scheduledAt: schedule.iso,
-          ...(r.stockNumber ? { stockNumber: r.stockNumber } : {}),
-        })),
-      });
+        body:
+          validCsvRows.length > 1
+            ? {
+                name: batchName.trim(),
+                ...(transportReference.trim() ? { transportReference: transportReference.trim() } : {}),
+                scheduledAt: schedule.iso,
+                vehicles,
+              }
+            : { ...vehicles[0]!, scheduledAt: schedule.iso },
+        },
+      );
       setCsvResults(result);
     } catch (err) {
       setMessage({ kind: "error", text: err instanceof Error ? err.message : "Bulk intake failed." });
@@ -242,8 +255,25 @@ export default function IntakePage() {
           <h2>Bulk CSV import</h2>
           <p className="field-hint" style={{ marginTop: 0 }}>
             Columns: <code>store, vin, model, stock</code> (header row optional; store accepts code,
-            name, or alias). Rows with errors are excluded from submission.
+            name, or alias). Multi-row files become store-specific execution batches that share one
+            transport group and run sequentially in AutoSoft.
           </p>
+          <label className="field">
+            <span>Batch name (required for multiple vehicles)</span>
+            <input
+              value={batchName}
+              onChange={(e) => setBatchName(e.target.value)}
+              placeholder="e.g. Riverside load 13552023"
+            />
+          </label>
+          <label className="field">
+            <span>Transport/load reference (optional)</span>
+            <input
+              value={transportReference}
+              onChange={(e) => setTransportReference(e.target.value)}
+              placeholder="e.g. 13552023"
+            />
+          </label>
           <label className="field">
             <span>CSV file</span>
             <input type="file" accept=".csv,text/csv" onChange={onCsvFile} />
@@ -294,7 +324,12 @@ export default function IntakePage() {
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={csvBusy || validCsvRows.length === 0 || !schedule?.ok}
+                disabled={
+                  csvBusy ||
+                  validCsvRows.length === 0 ||
+                  !schedule?.ok ||
+                  (validCsvRows.length > 1 && !batchName.trim())
+                }
                 onClick={submitCsv}
               >
                 {csvBusy ? "Submitting…" : `Submit ${validCsvRows.length} vehicles`}

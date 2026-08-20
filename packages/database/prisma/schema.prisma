@@ -17,6 +17,15 @@ enum VehicleStatus {
   FAILED
 }
 
+enum StockingBatchStatus {
+  PREPARING
+  READY
+  PROCESSING
+  PARTIAL
+  COMPLETED
+  FAILED
+}
+
 model Store {
   id               String    @id @default(cuid())
   code             String    @unique
@@ -31,12 +40,41 @@ model Store {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   vehicles         Vehicle[]
+  stockingBatches  StockingBatch[]
+}
+
+/// One store-specific execution batch. A mixed-store upload creates one row
+/// per store with a shared groupKey/transportReference.
+model StockingBatch {
+  id                 String              @id @default(cuid())
+  groupKey           String
+  name               String
+  transportReference String?
+  storeId            String
+  store              Store               @relation(fields: [storeId], references: [id])
+  status             StockingBatchStatus @default(PREPARING)
+  scheduledStartAt   DateTime
+  dispatchNonce      Int                 @default(0)
+  hermesDispatchedAt DateTime?
+  hermesRequestId    String?             @unique
+  startedAt          DateTime?
+  completedAt        DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  vehicles           Vehicle[]
+
+  @@unique([groupKey, storeId])
+  @@index([status, scheduledStartAt])
+  @@index([transportReference])
 }
 
 model Vehicle {
   id                 String         @id @default(cuid())
   storeId            String
   store              Store          @relation(fields: [storeId], references: [id])
+  stockingBatchId    String?
+  stockingBatch      StockingBatch? @relation(fields: [stockingBatchId], references: [id])
+  batchPosition      Int?
   vin                String
   model              String
   status             VehicleStatus  @default(PENDING)
@@ -68,6 +106,7 @@ model Vehicle {
   webhookEvents      WebhookEvent[]
 
   @@index([storeId, vin])
+  @@index([stockingBatchId, batchPosition])
   @@index([status])
   @@index([scheduledStartAt])
   @@index([vin])

@@ -17,6 +17,7 @@ import { logger } from "../logger";
 import { publishVehicleUpdate } from "../services/publish";
 import { serializeVehicle, transitionVehicle, updateMessageFor } from "../services/vehicleService";
 import { verifyWebhookSignature, webhookDedupeKey } from "../services/webhookAuth";
+import { enqueueBatchHermesDispatch, type Queues } from "../services/queues";
 
 /**
  * POST /api/webhooks/hermes
@@ -25,7 +26,12 @@ import { verifyWebhookSignature, webhookDedupeKey } from "../services/webhookAut
  * - Idempotent via unique dedupe key
  * - State transitions enforced against the canonical state machine
  */
-export function webhooksRouter(prisma: PrismaClient, config: ApiConfig, publisher: Redis): Router {
+export function webhooksRouter(
+  prisma: PrismaClient,
+  config: ApiConfig,
+  publisher: Redis,
+  queues: Queues,
+): Router {
   const router = Router();
 
   router.post("/hermes", async (req, res, next) => {
@@ -220,6 +226,51 @@ export function webhooksRouter(prisma: PrismaClient, config: ApiConfig, publishe
       });
 
       await publishVehicleUpdate(publisher, updateMessageFor(updated));
+      if (updated.stockingBatchId && callback.status !== "PROCESSING") {
+        const batch = await prisma.stockingBatch.findUnique({
+          where: { id: updated.stockingBatchId },
+          include: { vehicles: { select: { status: true, hermesDispatchedAt: true } } },
+        });
+        if (batch) {
+          const claimedActive = batch.vehicles.some(
+            (item) =>
+              item.status === "PROCESSING" ||
+              (item.status === "READY" && item.hermesDispatchedAt !== null),
+          );
+          if (!claimedActive) {
+            const unclaimedReady = batch.vehicles.some(
+              (item) => item.status === "READY" && item.hermesDispatchedAt === null,
+            );
+            if (unclaimedReady) {
+              const continuation = await prisma.stockingBatch.update({
+                where: { id: batch.id },
+                data: {
+                  status: "READY",
+                  dispatchNonce: { increment: 1 },
+                  hermesDispatchedAt: null,
+                  hermesRequestId: null,
+                },
+              });
+              await enqueueBatchHermesDispatch(
+                queues,
+                continuation.id,
+                continuation.dispatchNonce,
+                continuation.scheduledStartAt,
+              );
+            } else {
+              const allCompleted = batch.vehicles.every((item) => item.status === "COMPLETED");
+              await prisma.stockingBatch.update({
+                where: { id: batch.id },
+                data: {
+                  status: allCompleted ? "COMPLETED" : "PARTIAL",
+                  completedAt: allCompleted ? new Date() : null,
+                  hermesDispatchedAt: null,
+                },
+              });
+            }
+          }
+        }
+      }
       logger.info(
         { vehicleId: vehicle.id, from, to, requestId: req.requestId },
         "Applied Hermes callback",

@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 const LINKS = [
   { href: "/", label: "Command Center" },
   { href: "/intake", label: "Intake" },
+  { href: "/batches", label: "Stocking Batches" },
   { href: "/ledger", label: "Completed Ledger" },
   { href: "/stores", label: "Store Settings" },
 ];

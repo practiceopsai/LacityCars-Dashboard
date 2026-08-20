@@ -33,6 +33,10 @@ export function createHermesProcessor(deps: HermesDeps) {
 
   return async (job: Job<HermesJobData>, token?: string): Promise<void> => {
     const { vehicleId, nonce } = job.data;
+    if (!vehicleId) {
+      logger.warn({ jobId: job.id }, "Vehicle Hermes job missing vehicleId; dropping");
+      return;
+    }
     const vehicle = await prisma.vehicle.findUnique({
       where: { id: vehicleId },
       include: { store: true, corrections: { orderBy: { createdAt: "asc" } } },
@@ -71,10 +75,14 @@ export function createHermesProcessor(deps: HermesDeps) {
       where: { status: "PROCESSING", id: { not: vehicleId } },
       select: { id: true },
     });
-    if (activeVehicle) {
+    const activeBatch = await prisma.stockingBatch.findFirst({
+      where: { status: "PROCESSING" },
+      select: { id: true },
+    });
+    if (activeVehicle || activeBatch) {
       await job.moveToDelayed(Date.now() + config.HERMES_BUSY_DELAY_MS, token);
       logger.info(
-        { vehicleId, activeVehicleId: activeVehicle.id },
+        { vehicleId, activeVehicleId: activeVehicle?.id, activeBatchId: activeBatch?.id },
         "Hermes desktop busy; dispatch delayed",
       );
       throw new DelayedError();

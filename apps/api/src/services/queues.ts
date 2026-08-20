@@ -3,13 +3,15 @@ import { Redis } from "ioredis";
 import { FREIGHT_QUEUE, HERMES_QUEUE } from "@lacity/shared";
 
 export interface FreightJobData {
-  vehicleId: string;
+  vehicleId?: string;
+  batchId?: string;
   nonce: number;
   attempt: number;
 }
 
 export interface HermesJobData {
-  vehicleId: string;
+  vehicleId?: string;
+  batchId?: string;
   nonce: number;
 }
 
@@ -24,9 +26,17 @@ export function freightJobId(vehicleId: string, nonce: number, attempt: number):
   return `freight-${vehicleId}-${nonce}-${attempt}`;
 }
 
+export function batchFreightJobId(batchId: string, attempt: number): string {
+  return `freight-batch-${batchId}-${attempt}`;
+}
+
 /** BullMQ custom job IDs cannot contain colons. */
 export function hermesJobId(vehicleId: string, nonce: number): string {
   return `hermes-${vehicleId}-${nonce}`;
+}
+
+export function batchHermesJobId(batchId: string, nonce: number): string {
+  return `hermes-batch-${batchId}-${nonce}`;
 }
 
 export function createQueues(redisUrl: string): Queues {
@@ -45,6 +55,27 @@ export function createQueues(redisUrl: string): Queues {
   };
 }
 
+/** Queue one store batch as a single sequential Hermes desktop run. */
+export async function enqueueBatchHermesDispatch(
+  queues: Queues,
+  batchId: string,
+  nonce: number,
+  scheduledStartAt: Date,
+): Promise<void> {
+  await queues.hermes.add(
+    "dispatch-batch",
+    { batchId, nonce },
+    {
+      jobId: batchHermesJobId(batchId, nonce),
+      delay: Math.max(0, scheduledStartAt.getTime() - Date.now()),
+      attempts: 5,
+      backoff: { type: "exponential", delay: 30_000 },
+      removeOnComplete: 1000,
+      removeOnFail: 1000,
+    },
+  );
+}
+
 /** Queue the first freight verification for a vehicle (runs immediately). */
 export async function enqueueFreightCheck(
   queues: Queues,
@@ -56,6 +87,23 @@ export async function enqueueFreightCheck(
     { vehicleId, nonce: opts.nonce, attempt: opts.attempt },
     {
       jobId: freightJobId(vehicleId, opts.nonce, opts.attempt),
+      delay: opts.delayMs ?? 0,
+      removeOnComplete: 1000,
+      removeOnFail: 1000,
+    },
+  );
+}
+
+export async function enqueueBatchFreightCheck(
+  queues: Queues,
+  batchId: string,
+  opts: { delayMs?: number; attempt: number },
+): Promise<void> {
+  await queues.freight.add(
+    "check-batch",
+    { batchId, nonce: 0, attempt: opts.attempt },
+    {
+      jobId: batchFreightJobId(batchId, opts.attempt),
       delay: opts.delayMs ?? 0,
       removeOnComplete: 1000,
       removeOnFail: 1000,

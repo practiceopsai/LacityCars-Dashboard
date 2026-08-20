@@ -6,7 +6,13 @@ import { freightBackoffMs, type VehicleStatus } from "@lacity/shared";
 import type { WorkerConfig } from "../config";
 import { logger } from "../logger";
 import { publishVehicle } from "../publish";
-import { enqueueFreightCheck, enqueueHermesDispatch, type FreightJobData, type WorkerQueues } from "../queues";
+import {
+  enqueueBatchHermesDispatch,
+  enqueueFreightCheck,
+  enqueueHermesDispatch,
+  type FreightJobData,
+  type WorkerQueues,
+} from "../queues";
 import { loadDispatchWorkbook, WorkbookSourceError } from "../workbookSource";
 
 const CHECKABLE_STATUSES: VehicleStatus[] = ["PENDING", "AWAITING_FREIGHT"];
@@ -30,6 +36,10 @@ export function createFreightProcessor(deps: FreightDeps) {
 
   return async (job: Job<FreightJobData>): Promise<void> => {
     const { vehicleId, nonce } = job.data;
+    if (!vehicleId) {
+      logger.warn({ jobId: job.id }, "Vehicle freight job missing vehicleId; dropping");
+      return;
+    }
     const vehicle = await prisma.vehicle.findUnique({
       where: { id: vehicleId },
       include: { store: true },
@@ -96,12 +106,28 @@ export function createFreightProcessor(deps: FreightDeps) {
           failureReason: null,
         },
       });
-      await enqueueHermesDispatch(
-        queues,
-        vehicleId,
-        updated.dispatchNonce,
-        updated.scheduledStartAt,
-      );
+      if (updated.stockingBatchId) {
+        const batch = await prisma.stockingBatch.findUnique({ where: { id: updated.stockingBatchId } });
+        if (batch && batch.status !== "PROCESSING" && !["COMPLETED", "FAILED"].includes(batch.status)) {
+          const queued = await prisma.stockingBatch.update({
+            where: { id: batch.id },
+            data: { status: "READY", dispatchNonce: { increment: 1 } },
+          });
+          await enqueueBatchHermesDispatch(
+            queues,
+            queued.id,
+            queued.dispatchNonce,
+            queued.scheduledStartAt,
+          );
+        }
+      } else {
+        await enqueueHermesDispatch(
+          queues,
+          vehicleId,
+          updated.dispatchNonce,
+          updated.scheduledStartAt,
+        );
+      }
       await publishVehicle(publisher, updated);
       logger.info({ vehicleId, amount: result.amount }, "Freight verified; Hermes dispatch queued");
       return;

@@ -18,6 +18,18 @@ export const IntakeRequestSchema = z.union([
 ]);
 export type IntakeRequest = z.infer<typeof IntakeRequestSchema>;
 
+/** A transport upload is partitioned into one execution batch per store. */
+export const BatchIntakeRequestSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  transportReference: z.string().trim().max(120).optional(),
+  scheduledAt: z.string().datetime({ offset: true }),
+  vehicles: z
+    .array(IntakeVehicleSchema.omit({ scheduledAt: true }))
+    .min(2)
+    .max(200),
+});
+export type BatchIntakeRequest = z.infer<typeof BatchIntakeRequestSchema>;
+
 export const HermesCallbackStatusSchema = z.enum(["PROCESSING", "COMPLETED", "FAILED"]);
 export type HermesCallbackStatus = z.infer<typeof HermesCallbackStatusSchema>;
 
@@ -125,3 +137,32 @@ export const HermesTriggerPayloadSchema = z.object({
   ),
 });
 export type HermesTriggerPayload = z.infer<typeof HermesTriggerPayloadSchema>;
+
+/** One authenticated Hermes run that posts a store batch sequentially. */
+export const HermesBatchTriggerPayloadSchema = z.object({
+  request_id: z.string(),
+  callback_url: z.string().url(),
+  batch: z.object({
+    id: z.string(),
+    group_key: z.string(),
+    name: z.string(),
+    transport_reference: z.string().nullable(),
+  }),
+  schedule: HermesTriggerPayloadSchema.shape.schedule,
+  store: HermesTriggerPayloadSchema.shape.store,
+  vehicles: z
+    .array(
+      z.object({
+        request_id: z.string(),
+        vin: z.string(),
+        model: z.string(),
+        stock_number: z.string().nullable(),
+        freight: HermesTriggerPayloadSchema.shape.freight,
+        corrections: HermesTriggerPayloadSchema.shape.corrections,
+      }),
+    )
+    .min(1)
+    .max(200),
+});
+export type HermesBatchTriggerPayload = z.infer<typeof HermesBatchTriggerPayloadSchema>;
+export type HermesDispatchPayload = HermesTriggerPayload | HermesBatchTriggerPayload;

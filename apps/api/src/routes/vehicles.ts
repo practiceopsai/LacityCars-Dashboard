@@ -14,7 +14,12 @@ import {
 } from "@lacity/shared";
 import { HttpError } from "../middleware/error";
 import { publishVehicleUpdate } from "../services/publish";
-import { enqueueFreightCheck, enqueueHermesDispatch, type Queues } from "../services/queues";
+import {
+  enqueueBatchHermesDispatch,
+  enqueueFreightCheck,
+  enqueueHermesDispatch,
+  type Queues,
+} from "../services/queues";
 import {
   intakeVehicle,
   serializeVehicle,
@@ -267,7 +272,26 @@ export function vehiclesRouter(
         },
       });
       if (hasFreight) {
-        await enqueueHermesDispatch(queues, vehicle.id, nonce, scheduledStartAt);
+        if (vehicle.stockingBatchId) {
+          const batch = await prisma.stockingBatch.update({
+            where: { id: vehicle.stockingBatchId },
+            data: {
+              status: "READY",
+              dispatchNonce: { increment: 1 },
+              hermesDispatchedAt: null,
+              hermesRequestId: null,
+              ...(body.scheduledAt ? { scheduledStartAt } : {}),
+            },
+          });
+          await enqueueBatchHermesDispatch(
+            queues,
+            batch.id,
+            batch.dispatchNonce,
+            batch.scheduledStartAt,
+          );
+        } else {
+          await enqueueHermesDispatch(queues, vehicle.id, nonce, scheduledStartAt);
+        }
       } else {
         await enqueueFreightCheck(queues, vehicle.id, { nonce, attempt: 0 });
       }
@@ -288,6 +312,13 @@ export function vehiclesRouter(
         include: { store: true },
       });
       if (!vehicle) throw new HttpError(404, "VEHICLE_NOT_FOUND", "Vehicle not found");
+      if (vehicle.stockingBatchId) {
+        throw new HttpError(
+          409,
+          "BATCH_MANAGED_SCHEDULE",
+          "This vehicle belongs to a store batch; reschedule the batch so every child keeps the same AutoSoft window",
+        );
+      }
       if (!["PENDING", "AWAITING_FREIGHT", "READY"].includes(vehicle.status)) {
         throw new HttpError(
           409,

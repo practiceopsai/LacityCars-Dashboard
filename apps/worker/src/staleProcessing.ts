@@ -60,3 +60,46 @@ export async function recoverStaleProcessing(deps: StaleProcessingDeps): Promise
   }
   return recovered;
 }
+
+/**
+ * Fail every non-terminal child closed when a single-session batch stops
+ * producing callbacks. READY children with a dispatch claim may already have
+ * been touched in AutoSoft, so they require audited operator review too.
+ */
+export async function recoverStaleBatches(deps: StaleProcessingDeps): Promise<number> {
+  const transition = deps.transition ?? transitionVehicle;
+  const publish = deps.publish ?? publishVehicle;
+  const cutoff = new Date((deps.now ?? new Date()).getTime() - deps.timeoutMs);
+  const stale = await deps.prisma.stockingBatch.findMany({
+    where: { status: "PROCESSING", startedAt: { lte: cutoff } },
+    include: {
+      vehicles: {
+        where: { status: { in: ["READY", "PROCESSING"] }, hermesDispatchedAt: { not: null } },
+        include: { store: true },
+      },
+    },
+  });
+
+  let recovered = 0;
+  for (const batch of stale) {
+    for (const vehicle of batch.vehicles) {
+      try {
+        const updated = await transition(deps.prisma, vehicle.id, "FAILED", {
+          eventType: "BATCH_CALLBACK_TIMEOUT",
+          message: `Batch ${batch.name} stopped sending callbacks before the timeout`,
+          data: { failureReason: "Batch callback timeout; verify sheet and AutoSoft before retrying" },
+          payload: { batchId: batch.id, batchRequestId: batch.hermesRequestId, cutoff: cutoff.toISOString() },
+        });
+        await publish(deps.publisher, updated);
+      } catch (error) {
+        logger.warn({ error, batchId: batch.id, vehicleId: vehicle.id }, "Stale batch child changed concurrently");
+      }
+    }
+    const changed = await deps.prisma.stockingBatch.updateMany({
+      where: { id: batch.id, status: "PROCESSING" },
+      data: { status: "FAILED", hermesDispatchedAt: null },
+    });
+    recovered += changed.count;
+  }
+  return recovered;
+}

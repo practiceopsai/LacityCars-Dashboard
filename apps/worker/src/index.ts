@@ -5,9 +5,11 @@ import { FREIGHT_QUEUE, HERMES_QUEUE } from "@lacity/shared";
 import { loadConfig } from "./config";
 import { logger } from "./logger";
 import { createFreightProcessor } from "./processors/freightCheck";
+import { createBatchFreightProcessor } from "./processors/batchFreightCheck";
 import { createHermesProcessor } from "./processors/hermesDispatch";
+import { createBatchDispatchProcessor } from "./processors/batchDispatch";
 import { createWorkerQueues, type FreightJobData, type HermesJobData } from "./queues";
-import { recoverStaleProcessing } from "./staleProcessing";
+import { recoverStaleBatches, recoverStaleProcessing } from "./staleProcessing";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -16,14 +18,18 @@ async function main(): Promise<void> {
   const queues = createWorkerQueues(config.REDIS_URL);
   const connection = new Redis(config.REDIS_URL, { maxRetriesPerRequest: null });
 
+  const vehicleFreight = createFreightProcessor({ prisma, config, publisher, queues });
+  const batchFreight = createBatchFreightProcessor({ prisma, config, publisher, queues });
   const freightWorker = new Worker<FreightJobData>(
     FREIGHT_QUEUE,
-    createFreightProcessor({ prisma, config, publisher, queues }),
+    (job) => (job.data.batchId ? batchFreight(job) : vehicleFreight(job)),
     { connection, concurrency: 5 },
   );
+  const vehicleDispatch = createHermesProcessor({ prisma, config, publisher });
+  const batchDispatch = createBatchDispatchProcessor({ prisma, config, publisher });
   const hermesWorker = new Worker<HermesJobData>(
     HERMES_QUEUE,
-    createHermesProcessor({ prisma, config, publisher }),
+    (job, token) => (job.data.batchId ? batchDispatch(job, token) : vehicleDispatch(job, token)),
     // One desktop can safely operate only one AutoSoft session at a time.
     { connection, concurrency: 1 },
   );
@@ -43,11 +49,10 @@ async function main(): Promise<void> {
   logger.info("Worker online: freight-check + hermes-dispatch");
 
   const runWatchdog = (): void => {
-    void recoverStaleProcessing({
-      prisma,
-      publisher,
-      timeoutMs: config.HERMES_PROCESSING_TIMEOUT_MS,
-    }).catch((err) => logger.error({ err }, "Hermes processing watchdog failed"));
+    void (async () => {
+      await recoverStaleBatches({ prisma, publisher, timeoutMs: config.HERMES_PROCESSING_TIMEOUT_MS });
+      await recoverStaleProcessing({ prisma, publisher, timeoutMs: config.HERMES_PROCESSING_TIMEOUT_MS });
+    })().catch((err) => logger.error({ err }, "Hermes processing watchdog failed"));
   };
   runWatchdog();
   const watchdog = setInterval(runWatchdog, config.HERMES_WATCHDOG_INTERVAL_MS);

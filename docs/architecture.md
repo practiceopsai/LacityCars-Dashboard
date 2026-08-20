@@ -23,6 +23,7 @@ Route map:
 | --- | --- |
 | `POST /api/auth/login`, `/logout`, `GET /me` | constant-time password check → HMAC session cookie |
 | `POST /api/vehicles/intake` | single or batch; strict VIN; idempotent per active Store+VIN |
+| `POST /api/batches/intake`, `GET /api/batches` | split a transport upload by store; track execution/checkpoint status |
 | `GET /api/vehicles` | pagination + store/status/search filters |
 | `GET /api/vehicles/stream` | SSE, 15 s heartbeats, fed by Redis pub/sub |
 | `GET /api/vehicles/export.csv` | Excel-friendly (BOM, CRLF) ledger export |
@@ -54,6 +55,12 @@ limits, pino with secret redaction.
   failure the claim is released only if the vehicle is still `READY`, and BullMQ
   retries (5 attempts, exponential); the final failure marks the vehicle
   `FAILED` with a reason.
+- **store-batch dispatch.** Multi-row uploads share a transport `groupKey` and
+  are split into one `StockingBatch` per store. The worker claims all READY
+  children in input order and sends one Hermes run, which updates the sheet in
+  one pass and retains one AutoSoft session. Each VIN keeps its own request ID,
+  state transition, callback, RAG checkpoint, and failure result. Missing
+  freight is excluded rather than estimated and can enter a later continuation.
 
 ## Data model (Prisma)
 

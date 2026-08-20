@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Redis } from "ioredis";
 import type { PrismaClient, VehicleWithStore } from "@lacity/database";
-import { recoverStaleProcessing } from "../staleProcessing";
+import { recoverStaleBatches, recoverStaleProcessing } from "../staleProcessing";
 
 const publisher = {} as Redis;
 
@@ -62,5 +62,47 @@ describe("recoverStaleProcessing", () => {
     expect(count).toBe(0);
     expect(transition).not.toHaveBeenCalled();
     expect(publish).not.toHaveBeenCalled();
+  });
+});
+
+describe("recoverStaleBatches", () => {
+  it("fails every claimed non-terminal child and releases the desktop lock", async () => {
+    const child = {
+      id: "veh-1",
+      status: "READY",
+      store: { id: "store-1" },
+    };
+    const prisma = {
+      stockingBatch: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: "batch-1", name: "Load 42", hermesRequestId: "batch-1:1", vehicles: [child] },
+        ]),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    } as unknown as PrismaClient;
+    const updated = { ...child, status: "FAILED" } as unknown as VehicleWithStore;
+    const transition = vi.fn().mockResolvedValue(updated);
+    const publish = vi.fn().mockResolvedValue(undefined);
+
+    const count = await recoverStaleBatches({
+      prisma,
+      publisher,
+      timeoutMs: 90 * 60 * 1000,
+      now: new Date("2026-08-20T02:00:00.000Z"),
+      transition,
+      publish,
+    });
+
+    expect(count).toBe(1);
+    expect(transition).toHaveBeenCalledWith(
+      prisma,
+      "veh-1",
+      "FAILED",
+      expect.objectContaining({ eventType: "BATCH_CALLBACK_TIMEOUT" }),
+    );
+    expect(prisma.stockingBatch.updateMany).toHaveBeenCalledWith({
+      where: { id: "batch-1", status: "PROCESSING" },
+      data: { status: "FAILED", hermesDispatchedAt: null },
+    });
   });
 });

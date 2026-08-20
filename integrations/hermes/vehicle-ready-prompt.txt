@@ -1,26 +1,38 @@
 AUTOMATED VEHICLE STOCKING JOB FROM THE AUTHENTICATED DASHBOARD.
 
-This HMAC-authenticated vehicle.ready event is explicit authorization to stock and post exactly this one vehicle for exactly the named store. Load and follow the vehicle-stock-in skill and the repository's .hermes.md contract. Never broaden the store or vehicle scope.
-
-This trusted route provides terminal, file, browser, computer-use, vision, skill, task, and memory tools. Confirm their presence by beginning the required RAG lifecycle; do not claim that execution is unavailable without attempting the appropriate tool. Never use these tools outside this vehicle and store scope.
+This HMAC-authenticated event authorizes only the supplied vehicle or store-specific batch. Load and follow the vehicle-stock-in skill and the repository's .hermes.md contract. Never broaden the store, vehicle, or batch scope.
 
 Request ID: {request_id}
 Callback URL: {callback_url}
+Event type: {event_type}
 Store: {store.name} ({store.code})
 AutoSoft instance: {store.autosoft_instance}
 Stock prefix: {store.stock_prefix}
+Authorized start (UTC): {schedule.starts_at}
+Authorized start (Eastern): {schedule.eastern}
+Authorized start (Pacific): {schedule.pacific}
+
+Single-vehicle fields (vehicle.ready):
 VIN: {vehicle.vin}
 Vehicle: {vehicle.model}
 Proposed stock number: {vehicle.stock_number}
 Freight amount: {freight.amount}
 Freight evidence: {freight.evidence}
 Corrections: {corrections}
-Authorized start (UTC): {schedule.starts_at}
-Authorized start (Eastern): {schedule.eastern}
-Authorized start (Pacific): {schedule.pacific}
 
-The authorized start is a hard not-before boundary because AutoSoft is a shared account. Compare current time with schedule.starts_at. If current time is earlier, do not open or modify the stock sheet, NextGear, AutoSoft, or any live stocking system; fail closed and report the premature trigger. The worker normally delays delivery until this boundary, but this independent check is mandatory. The schedule authorizes only this run and does not authorize concurrent AutoSoft sessions.
+Batch fields (vehicle.batch_ready):
+Batch: {batch}
+Ordered vehicles: {vehicles}
 
-Before touching a live system, start the mandatory RAG run and complete every preflight gate, including duplicate VIN, current store, authoritative NextGear/source, dispatch evidence, accounting balance, and exact VIN-field clearing. The dashboard freight evidence is authoritative input but must still pass the playbook's defensibility checks. Process no other dashboard vehicle during this run.
+The authorized start is a hard not-before boundary because AutoSoft is a shared account. Compare current time with schedule.starts_at. If current time is earlier, do not open or modify the stock sheet, NextGear, AutoSoft, or any live stocking system; fail closed and report the premature trigger. The schedule never authorizes concurrent AutoSoft sessions.
 
-Immediately after the RAG run starts, call tools/dashboard_callback.py with PROCESSING. Always finish the RAG lifecycle. Then call the same helper exactly once with a terminal COMPLETED or FAILED payload containing request_id, VIN, stock number when assigned, ACV, freight, final total, RAG commit, concise run summary, and the exact failure reason when blocked. If a required execution tool fails, use the terminal callback helper to report FAILED whenever the terminal remains available. A missing source, missing defensible freight, duplicate/store conflict, rejected PIN, unexpected screen, or accounting mismatch must fail closed and be reported; never estimate or bypass a gate.
+For vehicle.ready, run the existing one-vehicle procedure and callback lifecycle.
+
+For vehicle.batch_ready, perform one batch RAG lifecycle and one sequential desktop session:
+1. Validate the named store, AutoSoft instance, schedule, duplicate VINs, freight evidence, source, accounting inputs, and every VIN before live entry. Never estimate missing freight.
+2. Update the stocking sheet for every validated vehicle in one pass, then perform a second row-by-row verification pass.
+3. Open the correct AutoSoft store once. Process vehicles strictly in payload order. For every vehicle, start a fresh vehicle record, completely clear the VIN field, enter only that VIN, apply the verified vehicle fields and store charge template, verify accounting, save, confirm the resulting stock number, and checkpoint before continuing.
+4. Send PROCESSING and then exactly one terminal COMPLETED or FAILED callback for each vehicle using that vehicle's own request_id and VIN. A vehicle-specific validation failure is isolated: callback FAILED for it and continue. A wrong store, lost AutoSoft session, rejected accounting authentication, or other store-wide safety failure stops the remaining batch and callbacks each unprocessed vehicle FAILED with the shared blocking reason.
+5. Update the RAG record after every vehicle checkpoint and finish with a batch summary. Never repost a vehicle whose callback/checkpoint is already terminal.
+
+The callback's stock number, ACV, freight, final total, source/run summary, and RAG commit must come from verified evidence. A missing source, missing defensible freight, duplicate/store conflict, rejected PIN, unexpected screen, or accounting mismatch must fail closed; never estimate or bypass a gate.

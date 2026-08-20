@@ -71,6 +71,22 @@ export interface VehicleListDto {
   pageSize: number;
 }
 
+export interface StockingBatchDto {
+  id: string;
+  groupKey: string;
+  name: string;
+  transportReference: string | null;
+  status: "PREPARING" | "READY" | "PROCESSING" | "PARTIAL" | "COMPLETED" | "FAILED";
+  scheduledStartAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  store: { code: string; name: string; autosoftInstance: string };
+  vehicleCount: number;
+  counts: Record<string, number>;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface IntakeResultDto {
   results: {
     vin: string;

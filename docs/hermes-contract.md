@@ -3,6 +3,13 @@
 Two directions: the **worker triggers Hermes** (outbound) and **Hermes reports
 milestones** to the API webhook (inbound). All bodies are JSON (UTF-8).
 
+Multi-row dashboard imports use `vehicle.batch_ready`. A mixed-store transport
+upload is split into one execution batch per store. Each payload contains the
+shared store/schedule plus an ordered `vehicles` array. Every child has its own
+`request_id`, freight evidence, and corrections. Hermes keeps one AutoSoft
+session, processes children sequentially, and sends the normal callback twice
+per child (`PROCESSING`, then `COMPLETED` or `FAILED`).
+
 ## 1. Trigger (worker → Hermes)
 
 `POST {HERMES_ENDPOINT}` to Hermes's native webhook route. The raw JSON body
@@ -77,6 +84,11 @@ the same signed body directly to `HERMES_ENDPOINT`.
   (5 attempts, exponential backoff), then the vehicle is marked `FAILED`.
 - The worker permits one active desktop run. Later READY vehicles remain
   delayed while another vehicle is `PROCESSING`.
+- A batch also holds the global desktop lock from trigger acceptance until all
+  claimed child callbacks are terminal. Completed children are permanent
+  checkpoints; a later continuation includes only newly READY, unclaimed VINs.
+  A watchdog fails every non-terminal claimed child closed if the batch stops
+  reporting, because partial live-system work cannot be assumed safe to retry.
 - `schedule.starts_at` is the authoritative UTC not-before boundary. The worker
   creates a delayed job and rechecks the boundary immediately before dispatch;
   Hermes independently checks it before touching any live system. Eastern and

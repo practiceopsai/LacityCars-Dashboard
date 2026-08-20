@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import type { HermesTriggerPayload } from "@lacity/shared";
+import type { HermesDispatchPayload } from "@lacity/shared";
 import type { WorkerConfig } from "./config";
 
 export class HermesTriggerError extends Error {
@@ -52,9 +52,10 @@ function buildOrgoForwardCommand(
  */
 export async function triggerHermes(
   config: WorkerConfig,
-  payload: HermesTriggerPayload,
+  payload: HermesDispatchPayload,
 ): Promise<void> {
-  const body = JSON.stringify({ event_type: "vehicle.ready", ...payload });
+  const eventType = "vehicles" in payload ? "vehicle.batch_ready" : "vehicle.ready";
+  const body = JSON.stringify({ event_type: eventType, ...payload });
   const timestamp = Math.floor(Date.now() / 1000).toString();
   const signature = createHmac("sha256", config.HERMES_TRIGGER_SECRET)
     .update(`${timestamp}.`)

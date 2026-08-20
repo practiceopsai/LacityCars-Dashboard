@@ -60,6 +60,9 @@ function makePrisma(vehicle: unknown, claimCount: number) {
     vehicleEvent: {
       create: vi.fn().mockResolvedValue({}),
     },
+    stockingBatch: {
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
   };
 }
 

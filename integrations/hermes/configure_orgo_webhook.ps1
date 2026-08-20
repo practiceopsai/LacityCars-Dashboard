@@ -80,7 +80,7 @@ Set-ConfigValue 'platforms.webhook.extra.port' '8644'
 Set-ConfigValue 'platforms.webhook.extra.rate_limit' '5'
 Set-ConfigValue 'platforms.webhook.extra.max_body_bytes' '65536'
 Set-ConfigValue 'platforms.webhook.extra.routes.vehicle-stocking.enabled' 'true'
-Set-ConfigValue 'platforms.webhook.extra.routes.vehicle-stocking.events' '["vehicle.ready"]'
+Set-ConfigValue 'platforms.webhook.extra.routes.vehicle-stocking.events' '["vehicle.ready","vehicle.batch_ready"]'
 Set-ConfigValue 'platforms.webhook.extra.routes.vehicle-stocking.secret' $triggerSecret
 Set-ConfigValue 'platforms.webhook.extra.routes.vehicle-stocking.prompt' $prompt
 Set-ConfigValue 'platforms.webhook.extra.routes.vehicle-stocking.skills' '["vehicle-stock-in"]'
@@ -115,14 +115,27 @@ $scheduleBlock = @'
 - Store scheduling instants in UTC and show both America/New_York (Eastern) and America/Los_Angeles (Pacific), using their date-specific daylight-saving abbreviations.
 '@
 
+$batchBlock = @'
+## Dashboard store-batch runs
+
+- A `vehicle.batch_ready` event is one store-specific execution batch. Never combine stores or switch AutoSoft instances inside the run.
+- Preflight every supplied vehicle first. Write all validated stocking-sheet rows in one pass and verify them in a second pass before opening AutoSoft.
+- Keep one AutoSoft session and process the ordered vehicles sequentially. Create a fresh record and completely clear/re-enter the VIN for every vehicle. Store charge values may come from the verified store template; VIN, ACV, freight, mileage, title, color, source, and totals remain vehicle-specific.
+- Send per-vehicle callbacks using each child `request_id`. Checkpoint RAG after every vehicle so a resumed batch cannot repost completed work.
+- Isolate vehicle-specific failures and continue. Stop the batch only for store-wide safety failures, and report every remaining child as FAILED with the shared reason.
+'@
+
 Append-Once (Join-Path $RagRoot '.hermes.md') '## Dashboard-triggered stocking runs' $contractBlock
 Append-Once (Join-Path $HermesHome 'skills\operations\vehicle-stock-in\SKILL.md') '## Dashboard-triggered stocking runs' $contractBlock
 Append-Once (Join-Path $RagRoot '.hermes.md') '## Scheduled stocking boundary' $scheduleBlock
 Append-Once (Join-Path $HermesHome 'skills\operations\vehicle-stock-in\SKILL.md') '## Scheduled stocking boundary' $scheduleBlock
+Append-Once (Join-Path $RagRoot '.hermes.md') '## Dashboard store-batch runs' $batchBlock
+Append-Once (Join-Path $HermesHome 'skills\operations\vehicle-stock-in\SKILL.md') '## Dashboard store-batch runs' $batchBlock
 $profileSkill = Join-Path $HermesHome 'profiles\vehiclestocking\skills\operations\vehicle-stock-in\SKILL.md'
 if (Test-Path -LiteralPath $profileSkill) {
     Append-Once $profileSkill '## Dashboard-triggered stocking runs' $contractBlock
     Append-Once $profileSkill '## Scheduled stocking boundary' $scheduleBlock
+    Append-Once $profileSkill '## Dashboard store-batch runs' $batchBlock
 }
 
 & $hermes config check | Out-Null

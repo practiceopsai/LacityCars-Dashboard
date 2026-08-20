@@ -14,6 +14,7 @@ import { storesRouter } from "./routes/stores";
 import type { StreamHandle } from "./routes/stream";
 import { vehiclesRouter } from "./routes/vehicles";
 import { webhooksRouter } from "./routes/webhooks";
+import { batchesRouter } from "./routes/batches";
 import type { Queues } from "./services/queues";
 
 export interface AppDeps {
@@ -46,7 +47,7 @@ export function buildApp(deps: AppDeps): Express {
     "/api/webhooks",
     rateLimit(redis, { bucket: "webhook", limit: 120, windowSeconds: 60 }),
     express.raw({ type: () => true, limit: "1mb" }),
-    webhooksRouter(prisma, config, publisher),
+    webhooksRouter(prisma, config, publisher, queues),
   );
 
   app.use(express.json({ limit: "1mb" }));
@@ -62,6 +63,11 @@ export function buildApp(deps: AppDeps): Express {
 
   // SSE stream — mounted before /api/vehicles so "/stream" never hits "/:id".
   app.use("/api/vehicles/stream", session, stream.router);
+  app.use(
+    "/api/batches",
+    session,
+    batchesRouter(prisma, queues, publisher, { csrf: requireCsrfHeader, limiter: mutationLimiter }),
+  );
   app.use(
     "/api/vehicles",
     session,

@@ -56,3 +56,23 @@ export async function loadDispatchWorkbook(config: WorkerConfig): Promise<Workbo
   const rows = await parseDispatchWorkbook(buffer);
   return { rows, source, fetchedAt: new Date().toISOString() };
 }
+
+let batchSnapshot: { expiresAt: number; promise: Promise<WorkbookSnapshot> } | null = null;
+
+/**
+ * Store batches launched together share one newly-fetched workbook snapshot.
+ * The short window only coalesces the same transport operation; later retry
+ * ticks fetch current dispatch data again.
+ */
+export function loadDispatchWorkbookForBatch(
+  config: WorkerConfig,
+  maxAgeMs = 30_000,
+): Promise<WorkbookSnapshot> {
+  if (batchSnapshot && batchSnapshot.expiresAt > Date.now()) return batchSnapshot.promise;
+  const promise = loadDispatchWorkbook(config).catch((error) => {
+    batchSnapshot = null;
+    throw error;
+  });
+  batchSnapshot = { expiresAt: Date.now() + maxAgeMs, promise };
+  return promise;
+}

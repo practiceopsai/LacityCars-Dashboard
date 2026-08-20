@@ -2,6 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   enqueueFreightCheck,
   enqueueHermesDispatch,
+  enqueueBatchHermesDispatch,
+  enqueueBatchFreightCheck,
+  batchHermesJobId,
+  batchFreightJobId,
   freightJobId,
   hermesJobId,
   type Queues,
@@ -62,5 +66,28 @@ describe("queue job IDs", () => {
     );
     const options = vi.mocked(queues.hermes.add).mock.calls[0]![2]!;
     expect(options.delay).toBeGreaterThan(50_000);
+  });
+
+  it("queues one delayed job for an execution batch", async () => {
+    const queues = mockQueues();
+    const start = new Date(Date.now() + 60_000);
+    await enqueueBatchHermesDispatch(queues, "batch-1", 3, start);
+    expect(batchHermesJobId("batch-1", 3)).toBe("hermes-batch-batch-1-3");
+    expect(queues.hermes.add).toHaveBeenCalledWith(
+      "dispatch-batch",
+      { batchId: "batch-1", nonce: 3 },
+      expect.objectContaining({ jobId: "hermes-batch-batch-1-3", delay: expect.any(Number) }),
+    );
+  });
+
+  it("queues one freight snapshot job for the whole batch", async () => {
+    const queues = mockQueues();
+    await enqueueBatchFreightCheck(queues, "batch-1", { attempt: 2, delayMs: 5000 });
+    expect(batchFreightJobId("batch-1", 2)).toBe("freight-batch-batch-1-2");
+    expect(queues.freight.add).toHaveBeenCalledWith(
+      "check-batch",
+      { batchId: "batch-1", nonce: 0, attempt: 2 },
+      expect.objectContaining({ jobId: "freight-batch-batch-1-2", delay: 5000 }),
+    );
   });
 });
