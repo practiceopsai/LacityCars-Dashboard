@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import { Router, type RequestHandler } from "express";
 import type { PrismaClient } from "@lacity/database";
 import type { Redis } from "ioredis";
-import { BatchIntakeRequestSchema, ScheduleRequestSchema } from "@lacity/shared";
+import {
+  BatchIntakeRequestSchema,
+  ExistingBatchRequestSchema,
+  ScheduleRequestSchema,
+} from "@lacity/shared";
 import { HttpError } from "../middleware/error";
 import { publishVehicleUpdate } from "../services/publish";
 import {
@@ -170,6 +174,93 @@ export function batchesRouter(
           duplicates: results.filter((result) => result.ok && result.duplicate).length,
           rejected: results.filter((result) => !result.ok).length,
         },
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/adopt", guards.limiter, guards.csrf, async (req, res, next) => {
+    try {
+      const input = ExistingBatchRequestSchema.parse(req.body);
+      const vehicleIds = [...new Set(input.vehicleIds)];
+      if (vehicleIds.length !== input.vehicleIds.length) {
+        throw new HttpError(400, "DUPLICATE_BATCH_VEHICLE", "Each vehicle may appear only once in a batch");
+      }
+      const vehicles = await prisma.vehicle.findMany({
+        where: { id: { in: vehicleIds } },
+        include: { store: true },
+      });
+      if (vehicles.length !== vehicleIds.length) {
+        throw new HttpError(404, "BATCH_VEHICLE_NOT_FOUND", "One or more selected vehicles were not found");
+      }
+      const byId = new Map(vehicles.map((vehicle) => [vehicle.id, vehicle]));
+      const ordered = vehicleIds.map((id) => byId.get(id)!);
+      const storeId = ordered[0]!.storeId;
+      if (ordered.some((vehicle) => vehicle.storeId !== storeId)) {
+        throw new HttpError(409, "MIXED_EXECUTION_STORES", "Existing vehicles must be batched one store at a time");
+      }
+      const blocked = ordered.filter(
+        (vehicle) =>
+          vehicle.status !== "READY" ||
+          vehicle.stockingBatchId !== null ||
+          vehicle.freightAmount === null ||
+          vehicle.freightEvidence === null,
+      );
+      if (blocked.length > 0) {
+        throw new HttpError(
+          409,
+          "VEHICLES_NOT_BATCH_READY",
+          `Every selected vehicle must be unbatched, READY, and have freight evidence. Blocked: ${blocked.map((v) => v.vin).join(", ")}`,
+        );
+      }
+      const scheduledStartAt = input.scheduledAt ? new Date(input.scheduledAt) : new Date();
+      const groupKey = randomUUID();
+      const batch = await prisma.$transaction(async (tx) => {
+        const created = await tx.stockingBatch.create({
+          data: {
+            groupKey,
+            name: input.name,
+            transportReference: input.transportReference ?? null,
+            storeId,
+            status: "READY",
+            scheduledStartAt,
+          },
+        });
+        for (let index = 0; index < ordered.length; index += 1) {
+          const vehicle = ordered[index]!;
+          await tx.vehicle.update({
+            where: { id: vehicle.id },
+            data: {
+              stockingBatchId: created.id,
+              batchPosition: index + 1,
+              scheduledStartAt,
+              dispatchNonce: { increment: 1 },
+              hermesDispatchedAt: null,
+              hermesRequestId: null,
+            },
+          });
+          await tx.vehicleEvent.create({
+            data: {
+              vehicleId: vehicle.id,
+              type: "EXISTING_BATCH_ASSIGNED",
+              fromStatus: "READY",
+              toStatus: "READY",
+              message: `Moved from individual queue into sequential batch ${input.name}`,
+              payload: { batchId: created.id, groupKey, position: index + 1 },
+            },
+          });
+        }
+        return created;
+      });
+      await enqueueBatchHermesDispatch(queues, batch.id, batch.dispatchNonce, scheduledStartAt);
+      res.status(201).json({
+        id: batch.id,
+        groupKey,
+        name: batch.name,
+        store: ordered[0]!.store.code,
+        vehicleCount: ordered.length,
+        scheduledStartAt: scheduledStartAt.toISOString(),
       });
     } catch (error) {
       next(error);

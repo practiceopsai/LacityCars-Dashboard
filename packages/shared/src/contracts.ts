@@ -30,6 +30,15 @@ export const BatchIntakeRequestSchema = z.object({
 });
 export type BatchIntakeRequest = z.infer<typeof BatchIntakeRequestSchema>;
 
+/** Convert already-verified READY vehicles into one ordered store batch. */
+export const ExistingBatchRequestSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  transportReference: z.string().trim().max(120).optional(),
+  scheduledAt: z.string().datetime({ offset: true }).optional(),
+  vehicleIds: z.array(z.string().trim().min(1)).min(2).max(200),
+});
+export type ExistingBatchRequest = z.infer<typeof ExistingBatchRequestSchema>;
+
 export const HermesCallbackStatusSchema = z.enum(["PROCESSING", "COMPLETED", "FAILED"]);
 export type HermesCallbackStatus = z.infer<typeof HermesCallbackStatusSchema>;
 

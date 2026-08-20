@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { BatchIntakeRequestSchema, HermesBatchTriggerPayloadSchema } from "../contracts";
+import {
+  BatchIntakeRequestSchema,
+  ExistingBatchRequestSchema,
+  HermesBatchTriggerPayloadSchema,
+} from "../contracts";
 
 const vehicles = [
   { store: "LA", vin: "1HGCM82633A004352", model: "Accord" },
@@ -26,6 +30,14 @@ describe("batch contracts", () => {
         vehicles: vehicles.slice(0, 1),
       }).success,
     ).toBe(false);
+  });
+
+  it("accepts an ordered set of already-ready vehicle IDs", () => {
+    const parsed = ExistingBatchRequestSchema.parse({
+      name: "LA ready continuation",
+      vehicleIds: ["vehicle-2", "vehicle-1"],
+    });
+    expect(parsed.vehicleIds).toEqual(["vehicle-2", "vehicle-1"]);
   });
 
   it("requires a child request ID and freight evidence for every dispatched VIN", () => {
