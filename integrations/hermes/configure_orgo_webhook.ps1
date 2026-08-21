@@ -116,6 +116,7 @@ $contractBlock = @'
 
 - A valid `vehicle.ready` event on the HMAC-authenticated `vehicle-stocking` webhook is explicit authorization to stock and post exactly the supplied vehicle for exactly the supplied store. It has the same live authority as an explicit stock-and-post message from the paired operator; do not request duplicate confirmation.
 - Process only one dashboard vehicle in the webhook session. Treat `request_id` as the immutable run identity and never substitute a different VIN or store.
+- Before any live input inside Remote Desktop, run `python tools/focus_autosoft_rdp.py --expected-title <payload store.autosoft_instance>`, require `ok: true`, capture the fresh screen, and visually verify the intended control. Never send background input to `mstsc.exe`; an `unverifiable` RDP action is a stop condition.
 - Use `tools/dashboard_callback.py` to send `PROCESSING` when live work begins and exactly one terminal `COMPLETED` or `FAILED` result after the mandatory RAG finish step. The helper reads its signing secret from the environment; never reveal, print, copy, or place that secret in an artifact.
 - The callback's `stock_number`, ACV, freight, final total, source/run summary, and RAG commit must come from verified run evidence. Any safety gate that blocks posting must be returned as `FAILED` with the exact reason.
 '@

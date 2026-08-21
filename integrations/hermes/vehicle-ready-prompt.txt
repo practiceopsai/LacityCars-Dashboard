@@ -26,7 +26,7 @@ Ordered vehicles: {vehicles}
 
 The authorized start is a hard not-before boundary because AutoSoft is a shared account. Compare current time with schedule.starts_at. If current time is earlier, do not open or modify the stock sheet, NextGear, AutoSoft, or any live stocking system; fail closed and report the premature trigger. The schedule never authorizes concurrent AutoSoft sessions.
 
-For vehicle.ready, run the existing one-vehicle procedure and callback lifecycle.
+For vehicle.ready, run the existing one-vehicle procedure and callback lifecycle. Before every live input inside Remote Desktop, use the same foreground focus guard described below and require a fresh visual proof of the intended control.
 
 For vehicle.batch_ready, perform one batch RAG lifecycle and one sequential desktop session:
 1. Parse the complete Ordered vehicles JSON before live work. Its array length MUST equal batch.vehicle_count and every object must have a complete request_id and 17-character VIN. If integrity fails, send one FAILED callback for any complete child with `failure_scope=BATCH`; the dashboard will fail the claimed siblings safely. Never work from a truncated manifest.
