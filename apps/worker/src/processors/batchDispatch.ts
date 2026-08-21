@@ -20,10 +20,10 @@ interface BatchDispatchDeps {
 // Ten compact records fit below Hermes's effective rendered-message limit
 // while still amortizing sheet and AutoSoft setup across a useful load window.
 const HERMES_BATCH_WINDOW = 10;
-// Hermes currently caps an individual rendered template value at roughly 4K
-// characters. Keep the JSON supplied to the `{vehicles}` placeholder below
-// that boundary with enough headroom for escaping/encoding differences.
-export const HERMES_VEHICLES_JSON_LIMIT = 3_200;
+// Hermes caps an individual rendered template value at 2,000 characters and
+// pretty-prints object/array substitutions. Budget the compact JSON much lower
+// so indentation and newline expansion cannot truncate a child record.
+export const HERMES_VEHICLES_JSON_LIMIT = 1_200;
 
 /**
  * The desktop agent only needs the defensible freight calculation, not a copy
