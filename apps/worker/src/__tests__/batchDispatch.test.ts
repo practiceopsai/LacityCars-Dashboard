@@ -7,6 +7,8 @@ import {
   compactCorrections,
   compactFreightEvidence,
   createBatchDispatchProcessor,
+  fitHermesVehicleManifest,
+  HERMES_VEHICLES_JSON_LIMIT,
 } from "../processors/batchDispatch";
 import type { HermesJobData } from "../queues";
 
@@ -106,9 +108,22 @@ describe("batch dispatch", () => {
         createdAt: new Date("2026-08-20T00:00:00.000Z"),
       })),
     );
-    expect(corrections).toHaveLength(3);
-    expect(corrections[0]!.note).toHaveLength(500);
-    expect(Object.keys(corrections[0]!.fields ?? {})).toHaveLength(10);
+    expect(corrections).toHaveLength(1);
+    expect(corrections[0]!.note).toHaveLength(160);
+    expect(Object.keys(corrections[0]!.fields ?? {})).toHaveLength(6);
+  });
+
+  it("fits only complete records inside the Hermes template-value budget", () => {
+    const records = Array.from({ length: 10 }, (_, index) => ({
+      request_id: `batch:1:${index + 1}:vehicle-${index}`,
+      vin: "1HGCM82633A004352",
+      model: "x".repeat(550),
+    }));
+    const selected = fitHermesVehicleManifest(records);
+    expect(selected.length).toBeGreaterThan(0);
+    expect(selected.length).toBeLessThan(records.length);
+    expect(JSON.stringify(selected).length).toBeLessThanOrEqual(HERMES_VEHICLES_JSON_LIMIT);
+    expect(selected).toEqual(records.slice(0, selected.length));
   });
 
   it("holds the entire batch until its not-before boundary", async () => {

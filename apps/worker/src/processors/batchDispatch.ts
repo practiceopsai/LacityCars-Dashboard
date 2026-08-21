@@ -20,6 +20,10 @@ interface BatchDispatchDeps {
 // Ten compact records fit below Hermes's effective rendered-message limit
 // while still amortizing sheet and AutoSoft setup across a useful load window.
 const HERMES_BATCH_WINDOW = 10;
+// Hermes currently caps an individual rendered template value at roughly 4K
+// characters. Keep the JSON supplied to the `{vehicles}` placeholder below
+// that boundary with enough headroom for escaping/encoding differences.
+export const HERMES_VEHICLES_JSON_LIMIT = 3_200;
 
 /**
  * The desktop agent only needs the defensible freight calculation, not a copy
@@ -45,20 +49,35 @@ export function compactFreightEvidence(value: unknown): Record<string, unknown> 
 export function compactCorrections(
   corrections: Array<{ note: string; fields: unknown; createdAt: Date }>,
 ) {
-  return corrections.slice(-3).map((correction) => {
+  return corrections.slice(-1).map((correction) => {
     const rawFields =
       typeof correction.fields === "object" && correction.fields !== null
-        ? Object.entries(correction.fields as Record<string, unknown>).slice(0, 10)
+        ? Object.entries(correction.fields as Record<string, unknown>).slice(0, 6)
         : [];
     return {
-      note: correction.note.slice(0, 500),
+      note: correction.note.slice(0, 160),
       fields:
         rawFields.length === 0
           ? null
-          : Object.fromEntries(rawFields.map(([key, value]) => [key, String(value).slice(0, 300)])),
+          : Object.fromEntries(rawFields.map(([key, value]) => [key, String(value).slice(0, 100)])),
       created_at: correction.createdAt.toISOString(),
     };
   });
+}
+
+export function fitHermesVehicleManifest<T>(records: T[]): T[] {
+  const selected: T[] = [];
+  for (const record of records) {
+    const candidate = [...selected, record];
+    if (
+      selected.length > 0 &&
+      JSON.stringify(candidate).length > HERMES_VEHICLES_JSON_LIMIT
+    ) {
+      break;
+    }
+    selected.push(record);
+  }
+  return selected;
 }
 
 /**
@@ -108,7 +127,7 @@ export function createBatchDispatchProcessor(deps: BatchDispatchDeps) {
       throw new DelayedError();
     }
 
-    const ready = batch.vehicles
+    const eligible = batch.vehicles
       .filter(
         (vehicle) =>
           vehicle.status === "READY" &&
@@ -117,7 +136,7 @@ export function createBatchDispatchProcessor(deps: BatchDispatchDeps) {
           vehicle.freightEvidence !== null,
       )
       .slice(0, HERMES_BATCH_WINDOW);
-    if (ready.length === 0) {
+    if (eligible.length === 0) {
       await prisma.stockingBatch.update({
         where: { id: batchId },
         data: { status: batch.vehicles.some((v) => v.status === "AWAITING_FREIGHT") ? "PARTIAL" : batch.status },
@@ -127,8 +146,21 @@ export function createBatchDispatchProcessor(deps: BatchDispatchDeps) {
     }
 
     const batchRequestId = `${batch.id}:${batch.dispatchNonce}`;
+    const manifestCandidates = eligible.map((vehicle, index) => ({
+      request_id: `${batchRequestId}:${index + 1}:${vehicle.id}`,
+      vin: vehicle.vin,
+      model: vehicle.model,
+      stock_number: vehicle.stockNumber,
+      freight: {
+        amount: Number(vehicle.freightAmount),
+        evidence: compactFreightEvidence(vehicle.freightEvidence),
+      },
+      corrections: compactCorrections(vehicle.corrections),
+    }));
+    const manifest = fitHermesVehicleManifest(manifestCandidates);
+    const ready = eligible.slice(0, manifest.length);
     const requestIds = new Map(
-      ready.map((vehicle, index) => [vehicle.id, `${batchRequestId}:${index + 1}:${vehicle.id}`]),
+      ready.map((vehicle, index) => [vehicle.id, manifest[index]!.request_id]),
     );
     const claimed = await prisma.$transaction(async (tx) => {
       const batchClaim = await tx.stockingBatch.updateMany({
@@ -184,17 +216,7 @@ export function createBatchDispatchProcessor(deps: BatchDispatchDeps) {
         internal_charges: batch.store.internalCharges as unknown as InternalCharge[],
         charges_total: batch.store.chargesTotal,
       },
-      vehicles: ready.map((vehicle) => ({
-        request_id: requestIds.get(vehicle.id)!,
-        vin: vehicle.vin,
-        model: vehicle.model,
-        stock_number: vehicle.stockNumber,
-        freight: {
-          amount: Number(vehicle.freightAmount),
-          evidence: compactFreightEvidence(vehicle.freightEvidence),
-        },
-        corrections: compactCorrections(vehicle.corrections),
-      })),
+      vehicles: manifest,
     };
 
     try {
