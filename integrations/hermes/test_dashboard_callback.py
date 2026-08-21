@@ -34,6 +34,7 @@ class DashboardCallbackTests(unittest.TestCase):
             acv=None,
             rag_commit_id=None,
             failure_reason=None,
+            failure_scope="VEHICLE",
             run_summary="Preflight started",
         )
         self.assertEqual(
@@ -42,6 +43,7 @@ class DashboardCallbackTests(unittest.TestCase):
                 "request_id": "veh-1:0",
                 "vin": "1HGCM82633A004352",
                 "status": "PROCESSING",
+                "failure_scope": "VEHICLE",
                 "run_summary": "Preflight started",
             },
         )

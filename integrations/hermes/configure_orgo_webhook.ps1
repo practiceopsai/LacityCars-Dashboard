@@ -3,7 +3,8 @@ param(
     [string]$RagRoot = 'C:\Users\Administrator\Desktop\LaCity\Lacity Cars',
     [string]$CallbackOrigin = 'https://lacity-api-production.up.railway.app',
     [string]$PromptFile = "$PSScriptRoot\vehicle-ready-prompt.txt",
-    [string]$CallbackHelper = "$PSScriptRoot\dashboard_callback.py"
+    [string]$CallbackHelper = "$PSScriptRoot\dashboard_callback.py",
+    [string]$RdpFocusHelper = "$PSScriptRoot\focus_autosoft_rdp.py"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,7 +12,7 @@ $hermes = Join-Path $HermesHome 'hermes-agent\bin\hermes.exe'
 $config = Join-Path $HermesHome 'config.yaml'
 $envFile = Join-Path $HermesHome '.env'
 
-foreach ($required in $hermes, $config, $envFile, $RagRoot, $PromptFile, $CallbackHelper) {
+foreach ($required in $hermes, $config, $envFile, $RagRoot, $PromptFile, $CallbackHelper, $RdpFocusHelper) {
     if (-not (Test-Path -LiteralPath $required)) { throw "Required path missing: $required" }
 }
 
@@ -65,6 +66,19 @@ function Append-Once([string]$Path, [string]$Marker, [string]$Block) {
     }
 }
 
+function Upsert-MarkedSection([string]$Path, [string]$Marker, [string]$Block) {
+    $text = [IO.File]::ReadAllText($Path)
+    $escaped = [Regex]::Escape($Marker)
+    $pattern = "(?ms)^$escaped\r?\n.*?(?=^## |\z)"
+    $replacement = $Block.Trim() + [Environment]::NewLine + [Environment]::NewLine
+    if ([Regex]::IsMatch($text, $pattern)) {
+        $text = [Regex]::Replace($text, $pattern, $replacement, 1)
+    } else {
+        $text = $text.TrimEnd() + [Environment]::NewLine + [Environment]::NewLine + $replacement
+    }
+    [IO.File]::WriteAllText($Path, $text.TrimEnd() + [Environment]::NewLine, (New-Object Text.UTF8Encoding($false)))
+}
+
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 Copy-Item -LiteralPath $config -Destination "$config.bak.dashboard-webhook.$timestamp" -Force
 
@@ -95,6 +109,7 @@ Set-DotEnvValue 'LACITY_DASHBOARD_CALLBACK_ORIGIN' $CallbackOrigin
 $toolsDir = Join-Path $RagRoot 'tools'
 New-Item -ItemType Directory -Path $toolsDir -Force | Out-Null
 Copy-Item -LiteralPath $CallbackHelper -Destination (Join-Path $toolsDir 'dashboard_callback.py') -Force
+Copy-Item -LiteralPath $RdpFocusHelper -Destination (Join-Path $toolsDir 'focus_autosoft_rdp.py') -Force
 
 $contractBlock = @'
 ## Dashboard-triggered stocking runs
@@ -119,23 +134,25 @@ $batchBlock = @'
 ## Dashboard store-batch runs
 
 - A `vehicle.batch_ready` event is one store-specific execution batch. Never combine stores or switch AutoSoft instances inside the run.
+- Before touching a live system, parse the complete ordered manifest. Its array length must equal `batch.vehicle_count`; every child needs a complete request ID and a 17-character VIN. A missing/truncated child is a batch-wide failure: make no live changes and report one child FAILED with `--failure-scope BATCH`.
 - Preflight every supplied vehicle first. Write all validated stocking-sheet rows in one pass and verify them in a second pass before opening AutoSoft.
-- Keep one AutoSoft session and process the ordered vehicles sequentially. Create a fresh record and completely clear/re-enter the VIN for every vehicle. Store charge values may come from the verified store template; VIN, ACV, freight, mileage, title, color, source, and totals remain vehicle-specific.
+- Before every RDP mutation run `python tools/focus_autosoft_rdp.py --expected-title "<payload store.autosoft_instance>"`. Continue only when it returns `ok: true`, capture the fresh screen, and visually prove the intended AutoSoft control is active. Never send background clicks, keys, clipboard text, or coordinate input to `mstsc.exe`; an `unverifiable` action is a stop condition, never permission to type.
+- Keep one foreground AutoSoft session and process the ordered vehicles sequentially. Create a fresh record and completely clear/re-enter the VIN for every vehicle. Store charge values may come from the verified store template; VIN, ACV, freight, mileage, title, color, source, and totals remain vehicle-specific.
 - Send per-vehicle callbacks using each child `request_id`. Checkpoint RAG after every vehicle so a resumed batch cannot repost completed work.
-- Isolate vehicle-specific failures and continue. Stop the batch only for store-wide safety failures, and report every remaining child as FAILED with the shared reason.
+- Isolate vehicle-specific failures and continue. For a store-wide safety failure, stop immediately and send one current-child FAILED callback with `--failure-scope BATCH`; the dashboard deterministically fails and releases all claimed siblings. Do not repeatedly attempt blind recovery.
 '@
 
-Append-Once (Join-Path $RagRoot '.hermes.md') '## Dashboard-triggered stocking runs' $contractBlock
-Append-Once (Join-Path $HermesHome 'skills\operations\vehicle-stock-in\SKILL.md') '## Dashboard-triggered stocking runs' $contractBlock
-Append-Once (Join-Path $RagRoot '.hermes.md') '## Scheduled stocking boundary' $scheduleBlock
-Append-Once (Join-Path $HermesHome 'skills\operations\vehicle-stock-in\SKILL.md') '## Scheduled stocking boundary' $scheduleBlock
-Append-Once (Join-Path $RagRoot '.hermes.md') '## Dashboard store-batch runs' $batchBlock
-Append-Once (Join-Path $HermesHome 'skills\operations\vehicle-stock-in\SKILL.md') '## Dashboard store-batch runs' $batchBlock
+Upsert-MarkedSection (Join-Path $RagRoot '.hermes.md') '## Dashboard-triggered stocking runs' $contractBlock
+Upsert-MarkedSection (Join-Path $HermesHome 'skills\operations\vehicle-stock-in\SKILL.md') '## Dashboard-triggered stocking runs' $contractBlock
+Upsert-MarkedSection (Join-Path $RagRoot '.hermes.md') '## Scheduled stocking boundary' $scheduleBlock
+Upsert-MarkedSection (Join-Path $HermesHome 'skills\operations\vehicle-stock-in\SKILL.md') '## Scheduled stocking boundary' $scheduleBlock
+Upsert-MarkedSection (Join-Path $RagRoot '.hermes.md') '## Dashboard store-batch runs' $batchBlock
+Upsert-MarkedSection (Join-Path $HermesHome 'skills\operations\vehicle-stock-in\SKILL.md') '## Dashboard store-batch runs' $batchBlock
 $profileSkill = Join-Path $HermesHome 'profiles\vehiclestocking\skills\operations\vehicle-stock-in\SKILL.md'
 if (Test-Path -LiteralPath $profileSkill) {
-    Append-Once $profileSkill '## Dashboard-triggered stocking runs' $contractBlock
-    Append-Once $profileSkill '## Scheduled stocking boundary' $scheduleBlock
-    Append-Once $profileSkill '## Dashboard store-batch runs' $batchBlock
+    Upsert-MarkedSection $profileSkill '## Dashboard-triggered stocking runs' $contractBlock
+    Upsert-MarkedSection $profileSkill '## Scheduled stocking boundary' $scheduleBlock
+    Upsert-MarkedSection $profileSkill '## Dashboard store-batch runs' $batchBlock
 }
 
 & $hermes config check | Out-Null
@@ -169,5 +186,6 @@ if (-not $health -or $health.status -ne 'ok') { throw 'Hermes webhook health che
     callback_secret = $callbackSecret
     webhook_health = $health.status
     helper_path = (Join-Path $toolsDir 'dashboard_callback.py')
+    focus_helper_path = (Join-Path $toolsDir 'focus_autosoft_rdp.py')
     config_backup = "$config.bak.dashboard-webhook.$timestamp"
 } | ConvertTo-Json -Compress

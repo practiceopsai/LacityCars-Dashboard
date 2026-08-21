@@ -35,6 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--acv", type=float)
     parser.add_argument("--rag-commit-id")
     parser.add_argument("--failure-reason")
+    parser.add_argument("--failure-scope", choices=("VEHICLE", "BATCH"), default="VEHICLE")
     parser.add_argument("--run-summary")
     parser.add_argument("--delivery-id")
     return parser.parse_args()
@@ -69,6 +70,7 @@ def build_payload(args: argparse.Namespace) -> dict[str, object]:
                 "acv": args.acv,
                 "rag_commit_id": args.rag_commit_id,
                 "failure_reason": args.failure_reason,
+                "failure_scope": args.failure_scope,
                 "run_summary": args.run_summary,
             }.items()
             if value is not None

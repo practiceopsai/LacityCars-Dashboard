@@ -35,9 +35,16 @@ export const ExistingBatchRequestSchema = z.object({
   name: z.string().trim().min(1).max(120),
   transportReference: z.string().trim().max(120).optional(),
   scheduledAt: z.string().datetime({ offset: true }).optional(),
-  vehicleIds: z.array(z.string().trim().min(1)).min(2).max(200),
+  vehicleIds: z.array(z.string().trim().min(1)).min(2).max(25),
 });
 export type ExistingBatchRequest = z.infer<typeof ExistingBatchRequestSchema>;
+
+/** Explicit audited retry for the non-completed children of one store batch. */
+export const BatchRetryRequestSchema = z.object({
+  note: z.string().trim().min(5).max(2000),
+  scheduledAt: z.string().datetime({ offset: true }),
+});
+export type BatchRetryRequest = z.infer<typeof BatchRetryRequestSchema>;
 
 export const HermesCallbackStatusSchema = z.enum(["PROCESSING", "COMPLETED", "FAILED"]);
 export type HermesCallbackStatus = z.infer<typeof HermesCallbackStatusSchema>;
@@ -55,6 +62,13 @@ export const HermesCallbackSchema = z.object({
   failure_reason: z.string().trim().max(4000).optional().nullable(),
   run_summary: z.string().trim().max(20000).optional().nullable(),
   evidence: z.record(z.unknown()).optional().nullable(),
+  /**
+   * BATCH is reserved for a store-wide blocker (wrong AutoSoft instance,
+   * unusable shared session, rejected accounting authentication, etc.). The
+   * API fails every still-claimed sibling closed so a partially-reporting
+   * desktop agent cannot leave the shared queue locked forever.
+   */
+  failure_scope: z.enum(["VEHICLE", "BATCH"]).optional().default("VEHICLE"),
 });
 export type HermesCallback = z.infer<typeof HermesCallbackSchema>;
 
@@ -156,6 +170,7 @@ export const HermesBatchTriggerPayloadSchema = z.object({
     group_key: z.string(),
     name: z.string(),
     transport_reference: z.string().nullable(),
+    vehicle_count: z.number().int().positive().max(25),
   }),
   schedule: HermesTriggerPayloadSchema.shape.schedule,
   store: HermesTriggerPayloadSchema.shape.store,
@@ -171,7 +186,7 @@ export const HermesBatchTriggerPayloadSchema = z.object({
       }),
     )
     .min(1)
-    .max(200),
+    .max(25),
 });
 export type HermesBatchTriggerPayload = z.infer<typeof HermesBatchTriggerPayloadSchema>;
 export type HermesDispatchPayload = HermesTriggerPayload | HermesBatchTriggerPayload;

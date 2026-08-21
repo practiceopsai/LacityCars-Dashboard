@@ -3,7 +3,11 @@ import { DelayedError, type Job } from "bullmq";
 import type { Redis } from "ioredis";
 import type { PrismaClient } from "@lacity/database";
 import type { WorkerConfig } from "../config";
-import { createBatchDispatchProcessor } from "../processors/batchDispatch";
+import {
+  compactCorrections,
+  compactFreightEvidence,
+  createBatchDispatchProcessor,
+} from "../processors/batchDispatch";
 import type { HermesJobData } from "../queues";
 
 vi.mock("../hermesClient", () => ({ triggerHermes: vi.fn() }));
@@ -82,6 +86,31 @@ function job(): Job<HermesJobData> {
 beforeEach(() => vi.clearAllMocks());
 
 describe("batch dispatch", () => {
+  it("compacts workbook evidence and operator history before prompting Hermes", () => {
+    const evidence = compactFreightEvidence({
+      loadId: "42",
+      loadPrice: 700,
+      distinctVinCount: 7,
+      matchedRowNumbers: [1, 2, 3, 4, 5, 6],
+      vins: Array.from({ length: 500 }, (_, index) => `VIN-${index}`),
+      source: "https://example.com/" + "x".repeat(20_000),
+    });
+    expect(evidence).not.toHaveProperty("vins");
+    expect(evidence).not.toHaveProperty("source");
+    expect(evidence.matchedRowNumbers).toEqual([1, 2, 3, 4]);
+
+    const corrections = compactCorrections(
+      Array.from({ length: 5 }, (_, index) => ({
+        note: `${index}`.repeat(1_000),
+        fields: Object.fromEntries(Array.from({ length: 20 }, (__, field) => [`field-${field}`, "x".repeat(600)])),
+        createdAt: new Date("2026-08-20T00:00:00.000Z"),
+      })),
+    );
+    expect(corrections).toHaveLength(3);
+    expect(corrections[0]!.note).toHaveLength(500);
+    expect(Object.keys(corrections[0]!.fields ?? {})).toHaveLength(10);
+  });
+
   it("holds the entire batch until its not-before boundary", async () => {
     const start = new Date(Date.now() + 60_000);
     const prisma = prismaMock(batch({ scheduledStartAt: start }));
@@ -109,6 +138,7 @@ describe("batch dispatch", () => {
       config,
       expect.objectContaining({
         request_id: "batch-1:2",
+        batch: expect.objectContaining({ vehicle_count: 2 }),
         vehicles: [
           expect.objectContaining({ vin: "1HGCM82633A004352" }),
           expect.objectContaining({ vin: "1M8GDM9AXKP042788" }),

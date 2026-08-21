@@ -24,6 +24,7 @@ Route map:
 | `POST /api/auth/login`, `/logout`, `GET /me` | constant-time password check → HMAC session cookie |
 | `POST /api/vehicles/intake` | single or batch; strict VIN; idempotent per active Store+VIN |
 | `POST /api/batches/intake`, `GET /api/batches` | split a transport upload by store; track execution/checkpoint status |
+| `POST /api/batches/:id/retry` | audited future-scheduled retry of non-completed children after live-state verification |
 | `GET /api/vehicles` | pagination + store/status/search filters |
 | `GET /api/vehicles/stream` | SSE, 15 s heartbeats, fed by Redis pub/sub |
 | `GET /api/vehicles/export.csv` | Excel-friendly (BOM, CRLF) ledger export |

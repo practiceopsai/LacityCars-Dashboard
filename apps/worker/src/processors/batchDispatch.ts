@@ -17,6 +17,50 @@ interface BatchDispatchDeps {
   publisher: Redis;
 }
 
+// Ten compact records fit below Hermes's effective rendered-message limit
+// while still amortizing sheet and AutoSoft setup across a useful load window.
+const HERMES_BATCH_WINDOW = 10;
+
+/**
+ * The desktop agent only needs the defensible freight calculation, not a copy
+ * of every dispatch row/VIN. Sending the raw workbook evidence made the
+ * Hermes webhook exceed its prompt limit and silently truncated a seven-car
+ * batch after vehicle two.
+ */
+export function compactFreightEvidence(value: unknown): Record<string, unknown> {
+  const source = typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+  return {
+    loadId: source.loadId ?? source.load_id ?? null,
+    loadPrice: source.loadPrice ?? source.load_price ?? null,
+    distinctVinCount: source.distinctVinCount ?? source.distinct_vin_count ?? null,
+    matchedRowNumbers: Array.isArray(source.matchedRowNumbers)
+      ? source.matchedRowNumbers.slice(0, 4)
+      : Array.isArray(source.matched_row_numbers)
+        ? source.matched_row_numbers.slice(0, 4)
+        : [],
+    fetchedAt: source.fetchedAt ?? source.fetched_at ?? null,
+  };
+}
+
+export function compactCorrections(
+  corrections: Array<{ note: string; fields: unknown; createdAt: Date }>,
+) {
+  return corrections.slice(-3).map((correction) => {
+    const rawFields =
+      typeof correction.fields === "object" && correction.fields !== null
+        ? Object.entries(correction.fields as Record<string, unknown>).slice(0, 10)
+        : [];
+    return {
+      note: correction.note.slice(0, 500),
+      fields:
+        rawFields.length === 0
+          ? null
+          : Object.fromEntries(rawFields.map(([key, value]) => [key, String(value).slice(0, 300)])),
+      created_at: correction.createdAt.toISOString(),
+    };
+  });
+}
+
 /**
  * Claims all READY vehicles in one store batch and sends one Hermes run.
  * Hermes updates the sheet in one pass, retains the AutoSoft session, and
@@ -64,13 +108,15 @@ export function createBatchDispatchProcessor(deps: BatchDispatchDeps) {
       throw new DelayedError();
     }
 
-    const ready = batch.vehicles.filter(
-      (vehicle) =>
-        vehicle.status === "READY" &&
-        vehicle.hermesDispatchedAt === null &&
-        vehicle.freightAmount !== null &&
-        vehicle.freightEvidence !== null,
-    );
+    const ready = batch.vehicles
+      .filter(
+        (vehicle) =>
+          vehicle.status === "READY" &&
+          vehicle.hermesDispatchedAt === null &&
+          vehicle.freightAmount !== null &&
+          vehicle.freightEvidence !== null,
+      )
+      .slice(0, HERMES_BATCH_WINDOW);
     if (ready.length === 0) {
       await prisma.stockingBatch.update({
         where: { id: batchId },
@@ -124,6 +170,7 @@ export function createBatchDispatchProcessor(deps: BatchDispatchDeps) {
         group_key: batch.groupKey,
         name: batch.name,
         transport_reference: batch.transportReference,
+        vehicle_count: ready.length,
       },
       schedule: {
         starts_at: batch.scheduledStartAt.toISOString(),
@@ -144,13 +191,9 @@ export function createBatchDispatchProcessor(deps: BatchDispatchDeps) {
         stock_number: vehicle.stockNumber,
         freight: {
           amount: Number(vehicle.freightAmount),
-          evidence: vehicle.freightEvidence as Record<string, unknown>,
+          evidence: compactFreightEvidence(vehicle.freightEvidence),
         },
-        corrections: vehicle.corrections.map((correction) => ({
-          note: correction.note,
-          fields: (correction.fields as Record<string, string> | null) ?? null,
-          created_at: correction.createdAt.toISOString(),
-        })),
+        corrections: compactCorrections(vehicle.corrections),
       })),
     };
 

@@ -226,7 +226,50 @@ export function webhooksRouter(
       });
 
       await publishVehicleUpdate(publisher, updateMessageFor(updated));
-      if (updated.stockingBatchId && callback.status !== "PROCESSING") {
+      const batchWideFailure =
+        updated.stockingBatchId !== null &&
+        callback.status === "FAILED" &&
+        callback.failure_scope === "BATCH";
+      let batchFailedVehicleCount = 0;
+      if (updated.stockingBatchId && batchWideFailure) {
+        const sharedReason =
+          callback.failure_reason ?? "Hermes reported an unspecified store-wide batch failure";
+        const siblings = await prisma.vehicle.findMany({
+          where: {
+            stockingBatchId: updated.stockingBatchId,
+            id: { not: updated.id },
+            status: { in: ["READY", "PROCESSING"] },
+            hermesDispatchedAt: { not: null },
+          },
+          select: { id: true },
+        });
+        for (const sibling of siblings) {
+          const failed = await transitionVehicle(prisma, sibling.id, "FAILED", {
+            eventType: "BATCH_STORE_WIDE_FAILURE",
+            message: `Batch stopped safely: ${sharedReason}`,
+            payload: {
+              batchId: updated.stockingBatchId,
+              reportedByVehicleId: updated.id,
+              reportedRequestId: callback.request_id ?? null,
+            },
+            data: {
+              failureReason: sharedReason,
+              runSummary: "Not processed because a sibling reported a store-wide AutoSoft safety blocker.",
+            },
+          });
+          batchFailedVehicleCount += 1;
+          await publishVehicleUpdate(publisher, updateMessageFor(failed));
+        }
+        await prisma.stockingBatch.update({
+          where: { id: updated.stockingBatchId },
+          data: {
+            status: "FAILED",
+            completedAt: new Date(),
+            hermesDispatchedAt: null,
+            hermesRequestId: null,
+          },
+        });
+      } else if (updated.stockingBatchId && callback.status !== "PROCESSING") {
         const batch = await prisma.stockingBatch.findUnique({
           where: { id: updated.stockingBatchId },
           include: { vehicles: { select: { status: true, hermesDispatchedAt: true } } },
@@ -275,7 +318,13 @@ export function webhooksRouter(
         { vehicleId: vehicle.id, from, to, requestId: req.requestId },
         "Applied Hermes callback",
       );
-      res.status(200).json({ status: "applied", vehicle: serializeVehicle(updated), from, to });
+      res.status(200).json({
+        status: "applied",
+        vehicle: serializeVehicle(updated),
+        from,
+        to,
+        batchFailedVehicleCount,
+      });
     } catch (err) {
       next(err);
     }

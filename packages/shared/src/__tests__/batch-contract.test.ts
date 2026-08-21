@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   BatchIntakeRequestSchema,
+  BatchRetryRequestSchema,
   ExistingBatchRequestSchema,
   HermesBatchTriggerPayloadSchema,
+  HermesCallbackSchema,
 } from "../contracts";
 
 const vehicles = [
@@ -44,7 +46,13 @@ describe("batch contracts", () => {
     const base = {
       request_id: "batch-1:2",
       callback_url: "https://api.example.com/api/webhooks/hermes",
-      batch: { id: "batch-1", group_key: "group-1", name: "Load 42", transport_reference: "42" },
+      batch: {
+        id: "batch-1",
+        group_key: "group-1",
+        name: "Load 42",
+        transport_reference: "42",
+        vehicle_count: 1,
+      },
       schedule: { starts_at: "2026-08-21T23:00:00.000Z", eastern: "7 PM EDT", pacific: "4 PM PDT" },
       store: {
         code: "LA_CITY",
@@ -70,5 +78,22 @@ describe("batch contracts", () => {
         vehicles: [{ ...base.vehicles[0], request_id: undefined }],
       }).success,
     ).toBe(false);
+  });
+
+  it("supports explicit batch-wide failure and audited retry contracts", () => {
+    const callback = HermesCallbackSchema.parse({
+      request_id: "batch-1:2:1:vehicle-1",
+      vin: "1HGCM82633A004352",
+      status: "FAILED",
+      failure_scope: "BATCH",
+      failure_reason: "AutoSoft session is unusable",
+    });
+    expect(callback.failure_scope).toBe("BATCH");
+    expect(
+      BatchRetryRequestSchema.parse({
+        note: "Foreground guard installed; retry authorized",
+        scheduledAt: "2026-08-21T23:00:00.000Z",
+      }).note,
+    ).toContain("retry");
   });
 });

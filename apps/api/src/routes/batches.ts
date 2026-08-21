@@ -4,6 +4,7 @@ import type { PrismaClient } from "@lacity/database";
 import type { Redis } from "ioredis";
 import {
   BatchIntakeRequestSchema,
+  BatchRetryRequestSchema,
   ExistingBatchRequestSchema,
   ScheduleRequestSchema,
 } from "@lacity/shared";
@@ -300,6 +301,96 @@ export function batchesRouter(
       res.json({
         id: batch.id,
         status: batch.status,
+        scheduledStartAt: batch.scheduledStartAt.toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/:id/retry", guards.limiter, guards.csrf, async (req, res, next) => {
+    try {
+      const body = BatchRetryRequestSchema.parse(req.body);
+      const scheduledStartAt = new Date(body.scheduledAt);
+      if (scheduledStartAt.getTime() <= Date.now()) {
+        throw new HttpError(400, "SCHEDULE_IN_PAST", "Batch retry time must be in the future");
+      }
+      const existing = await prisma.stockingBatch.findUnique({
+        where: { id: req.params.id },
+        include: { vehicles: { orderBy: [{ batchPosition: "asc" }, { createdAt: "asc" }] } },
+      });
+      if (!existing) throw new HttpError(404, "BATCH_NOT_FOUND", "Stocking batch not found");
+      if (existing.status === "PROCESSING") {
+        throw new HttpError(409, "BATCH_STILL_PROCESSING", "Stop or fail the active batch before retrying it");
+      }
+      if (existing.status === "COMPLETED") {
+        throw new HttpError(409, "BATCH_ALREADY_COMPLETED", "A completed batch cannot be retried");
+      }
+      const retryable = existing.vehicles.filter((vehicle) => vehicle.status !== "COMPLETED");
+      if (retryable.length === 0) {
+        throw new HttpError(409, "NO_RETRYABLE_VEHICLES", "This batch has no non-completed vehicles");
+      }
+      const missingFreight = retryable.filter(
+        (vehicle) => vehicle.freightAmount === null || vehicle.freightEvidence === null,
+      );
+      if (missingFreight.length > 0) {
+        throw new HttpError(
+          409,
+          "BATCH_RETRY_MISSING_FREIGHT",
+          `Freight evidence is required before retry: ${missingFreight.map((vehicle) => vehicle.vin).join(", ")}`,
+        );
+      }
+
+      const batch = await prisma.$transaction(async (tx) => {
+        for (const vehicle of retryable) {
+          await tx.vehicle.update({
+            where: { id: vehicle.id },
+            data: {
+              status: "READY",
+              scheduledStartAt,
+              dispatchNonce: { increment: 1 },
+              hermesDispatchedAt: null,
+              hermesRequestId: null,
+              failureReason: null,
+              completedAt: null,
+            },
+          });
+          await tx.vehicleEvent.create({
+            data: {
+              vehicleId: vehicle.id,
+              type: "BATCH_RETRY_REQUESTED",
+              fromStatus: vehicle.status,
+              toStatus: "READY",
+              message: body.note,
+              payload: { batchId: existing.id, scheduledStartAt: scheduledStartAt.toISOString() },
+            },
+          });
+        }
+        return tx.stockingBatch.update({
+          where: { id: existing.id },
+          data: {
+            status: "READY",
+            scheduledStartAt,
+            dispatchNonce: { increment: 1 },
+            hermesDispatchedAt: null,
+            hermesRequestId: null,
+            startedAt: null,
+            completedAt: null,
+          },
+        });
+      });
+      await enqueueBatchHermesDispatch(queues, batch.id, batch.dispatchNonce, batch.scheduledStartAt);
+      for (const vehicle of retryable) {
+        const refreshed = await prisma.vehicle.findUniqueOrThrow({
+          where: { id: vehicle.id },
+          include: { store: true },
+        });
+        await publishVehicleUpdate(publisher, updateMessageFor(refreshed));
+      }
+      res.json({
+        id: batch.id,
+        status: batch.status,
+        retriedVehicleCount: retryable.length,
         scheduledStartAt: batch.scheduledStartAt.toISOString(),
       });
     } catch (error) {

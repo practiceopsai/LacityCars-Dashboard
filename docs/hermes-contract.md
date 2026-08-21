@@ -10,6 +10,11 @@ shared store/schedule plus an ordered `vehicles` array. Every child has its own
 session, processes children sequentially, and sends the normal callback twice
 per child (`PROCESSING`, then `COMPLETED` or `FAILED`).
 
+Batch triggers are compact execution manifests, not workbook exports. They are
+limited to ten children per Hermes run; larger store batches continue in later
+windows. `batch.vehicle_count` must exactly equal the received array length.
+Hermes rejects a truncated or incomplete manifest before any live change.
+
 ## 1. Trigger (worker → Hermes)
 
 `POST {HERMES_ENDPOINT}` to Hermes's native webhook route. The raw JSON body
@@ -62,10 +67,7 @@ the same signed body directly to `HERMES_ENDPOINT`.
       "loadId": "123456789012",
       "loadPrice": 900,
       "distinctVinCount": 3,
-      "vins": ["..."],
       "matchedRowNumbers": [12],
-      "loadRowNumbers": [12, 13, 14],
-      "source": "https://.../dispatch.xlsx",
       "fetchedAt": "2026-08-19T18:00:00.000Z"
     }
   },
@@ -89,6 +91,9 @@ the same signed body directly to `HERMES_ENDPOINT`.
   checkpoints; a later continuation includes only newly READY, unclaimed VINs.
   A watchdog fails every non-terminal claimed child closed if the batch stops
   reporting, because partial live-system work cannot be assumed safe to retry.
+- Before live RDP input, Hermes uses `tools/focus_autosoft_rdp.py` and proves
+  that exactly one RDP window matches `store.autosoft_instance` and is
+  foreground. Background or unverifiable `mstsc.exe` input is forbidden.
 - `schedule.starts_at` is the authoritative UTC not-before boundary. The worker
   creates a delayed job and rechecks the boundary immediately before dispatch;
   Hermes independently checks it before touching any live system. Eastern and
@@ -120,6 +125,7 @@ Body:
   "request_id": "cmb123abc:0",
   "vin": "1HGCM82633A004352",
   "status": "COMPLETED",
+  "failure_scope": "VEHICLE",
   "stock_number": "L12345",
   "freight_amount": 300,
   "final_total": 2304,
@@ -136,6 +142,13 @@ Body:
   `failure_reason`.
 - Only `vin` and `status` are required; send everything you have. `acv`,
   `final_total`, `stock_number`, and `rag_commit_id` populate the Completed Ledger.
+- `failure_scope` defaults to `VEHICLE`. Use `BATCH` only for a shared
+  store-wide blocker such as a wrong/unusable AutoSoft session, rejected
+  accounting authentication, or an AAJ3/runtime error. One BATCH-scoped FAILED
+  callback makes the API fail and release every still-claimed sibling.
+- Operators retry a verified non-completed batch with
+  `POST /api/batches/:id/retry`, a required audit note, and a future
+  `scheduledAt`. Completed children are never reset or reposted.
 
 ### Signature example (Python)
 
