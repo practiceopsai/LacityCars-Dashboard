@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   enqueueFreightCheck,
   enqueueHermesDispatch,
+  AUTO_BATCH_SETTLE_MS,
   freightJobId,
   hermesJobId,
   type WorkerQueues,
@@ -45,5 +46,7 @@ describe("queue job IDs", () => {
       { vehicleId, nonce: 4 },
       expect.objectContaining({ jobId: `hermes-${vehicleId}-4` }),
     );
+    const options = vi.mocked(queues.hermes.add).mock.calls[0]![2]!;
+    expect(options.delay).toBeGreaterThanOrEqual(AUTO_BATCH_SETTLE_MS - 1000);
   });
 });

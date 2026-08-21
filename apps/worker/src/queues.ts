@@ -2,6 +2,10 @@ import { Queue } from "bullmq";
 import { Redis } from "ioredis";
 import { FREIGHT_QUEUE, HERMES_QUEUE } from "@lacity/shared";
 
+// Allow concurrent freight checks from the same upload to settle so the first
+// due dispatch can assemble the whole store into one AutoSoft session.
+export const AUTO_BATCH_SETTLE_MS = 30_000;
+
 export interface FreightJobData {
   vehicleId?: string;
   batchId?: string;
@@ -114,7 +118,10 @@ export async function enqueueHermesDispatch(
   nonce: number,
   scheduledStartAt?: Date | null,
 ): Promise<void> {
-  const delay = scheduledStartAt ? Math.max(0, scheduledStartAt.getTime() - Date.now()) : 0;
+  const delay = Math.max(
+    AUTO_BATCH_SETTLE_MS,
+    scheduledStartAt ? scheduledStartAt.getTime() - Date.now() : 0,
+  );
   await queues.hermes.add(
     "dispatch",
     { vehicleId, nonce },

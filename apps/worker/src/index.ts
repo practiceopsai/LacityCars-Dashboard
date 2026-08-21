@@ -25,7 +25,7 @@ async function main(): Promise<void> {
     (job) => (job.data.batchId ? batchFreight(job) : vehicleFreight(job)),
     { connection, concurrency: 5 },
   );
-  const vehicleDispatch = createHermesProcessor({ prisma, config, publisher });
+  const vehicleDispatch = createHermesProcessor({ prisma, config, publisher, queues });
   const batchDispatch = createBatchDispatchProcessor({ prisma, config, publisher });
   const hermesWorker = new Worker<HermesJobData>(
     HERMES_QUEUE,

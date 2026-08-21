@@ -4,7 +4,7 @@ import type { Redis } from "ioredis";
 import type { PrismaClient } from "@lacity/database";
 import type { WorkerConfig } from "../config";
 import { createHermesProcessor } from "../processors/hermesDispatch";
-import type { HermesJobData } from "../queues";
+import type { HermesJobData, WorkerQueues } from "../queues";
 
 vi.mock("../hermesClient", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
@@ -35,6 +35,8 @@ const store = {
 function makeVehicle(overrides: Record<string, unknown> = {}) {
   return {
     id: "veh-1",
+    storeId: "store-la",
+    stockingBatchId: null,
     vin: "1HGCM82633A004352",
     model: "Accord",
     stockNumber: "LC1001",
@@ -45,6 +47,7 @@ function makeVehicle(overrides: Record<string, unknown> = {}) {
     freightEvidence: { loadId: "L-9" },
     store,
     corrections: [],
+    createdAt: new Date("2019-01-01T00:00:00.000Z"),
     ...overrides,
   };
 }
@@ -193,6 +196,51 @@ describe("createHermesProcessor", () => {
       }),
     );
     expect(publishVehicle).toHaveBeenCalledOnce();
+  });
+
+  it("assembles all due freight-ready vehicles for one store before triggering Hermes", async () => {
+    const vehicle = makeVehicle();
+    const sibling = makeVehicle({ id: "veh-2", vin: "5YJ3E1EA7KF317000" });
+    const tx = {
+      stockingBatch: {
+        create: vi.fn().mockResolvedValue({
+          id: "batch-auto",
+          dispatchNonce: 0,
+          scheduledStartAt: new Date("2020-01-01T00:00:00.000Z"),
+        }),
+      },
+      vehicle: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      vehicleEvent: { create: vi.fn().mockResolvedValue({}) },
+    };
+    const prisma = {
+      ...makePrisma(vehicle, 1),
+      vehicle: {
+        ...makePrisma(vehicle, 1).vehicle,
+        findMany: vi.fn().mockResolvedValue([vehicle, sibling]),
+      },
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+    };
+    const queues = {
+      freight: { add: vi.fn() },
+      hermes: { add: vi.fn().mockResolvedValue(undefined) },
+      close: vi.fn(),
+    } as unknown as WorkerQueues;
+    const processor = createHermesProcessor({
+      prisma: prisma as unknown as PrismaClient,
+      config,
+      publisher,
+      queues,
+    });
+
+    await processor(makeJob());
+
+    expect(tx.vehicle.updateMany).toHaveBeenCalledTimes(2);
+    expect(queues.hermes.add).toHaveBeenCalledWith(
+      "dispatch-batch",
+      { batchId: "batch-auto", nonce: 0 },
+      expect.objectContaining({ jobId: "hermes-batch-batch-auto-0" }),
+    );
+    expect(triggerHermes).not.toHaveBeenCalled();
   });
 
   it("releases the claim and rethrows when the Hermes trigger fails", async () => {

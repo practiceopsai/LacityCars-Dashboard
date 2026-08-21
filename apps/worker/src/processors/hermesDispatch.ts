@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { DelayedError, type Job } from "bullmq";
 import type { Redis } from "ioredis";
 import { transitionVehicle, type PrismaClient } from "@lacity/database";
@@ -10,12 +11,85 @@ import type { WorkerConfig } from "../config";
 import { HermesTriggerError, triggerHermes } from "../hermesClient";
 import { logger } from "../logger";
 import { publishVehicle } from "../publish";
-import type { HermesJobData } from "../queues";
+import {
+  enqueueBatchHermesDispatch,
+  type HermesJobData,
+  type WorkerQueues,
+} from "../queues";
 
 export interface HermesDeps {
   prisma: PrismaClient;
   config: WorkerConfig;
   publisher: Redis;
+  queues?: WorkerQueues;
+}
+
+/**
+ * Convert due, freight-verified standalone work into one store-locked batch.
+ * The Hermes worker has concurrency=1, so this transaction is the single
+ * assembly point and queued single-vehicle jobs become harmless no-ops once
+ * their records carry a batch ID.
+ */
+async function assembleDueStoreBatch(
+  prisma: PrismaClient,
+  queues: WorkerQueues,
+  storeId: string,
+  storeName: string,
+): Promise<string | null> {
+  const now = new Date();
+  const due = await prisma.vehicle.findMany({
+    where: {
+      storeId,
+      stockingBatchId: null,
+      status: "READY",
+      hermesDispatchedAt: null,
+      scheduledStartAt: { lte: now },
+    },
+    orderBy: [{ scheduledStartAt: "asc" }, { createdAt: "asc" }],
+  });
+  const ready = due.filter(
+    (candidate) => candidate.freightAmount !== null && candidate.freightEvidence !== null,
+  );
+  if (ready.length === 0) return null;
+
+  const groupKey = randomUUID();
+  const batch = await prisma.$transaction(async (tx) => {
+    const created = await tx.stockingBatch.create({
+      data: {
+        groupKey,
+        name: `${storeName} automatic freight-ready batch`,
+        storeId,
+        status: "READY",
+        scheduledStartAt: now,
+      },
+    });
+    for (let index = 0; index < ready.length; index += 1) {
+      const candidate = ready[index]!;
+      const claimed = await tx.vehicle.updateMany({
+        where: {
+          id: candidate.id,
+          stockingBatchId: null,
+          status: "READY",
+          hermesDispatchedAt: null,
+        },
+        data: { stockingBatchId: created.id, batchPosition: index + 1 },
+      });
+      if (claimed.count !== 1) throw new Error(`Could not batch READY vehicle ${candidate.id}`);
+      await tx.vehicleEvent.create({
+        data: {
+          vehicleId: candidate.id,
+          type: "AUTOMATIC_BATCH_ASSIGNED",
+          fromStatus: "READY",
+          toStatus: "READY",
+          message: `Grouped into ${storeName} freight-ready batch`,
+          payload: { batchId: created.id, groupKey, position: index + 1 },
+        },
+      });
+    }
+    return created;
+  });
+  await enqueueBatchHermesDispatch(queues, batch.id, batch.dispatchNonce, batch.scheduledStartAt);
+  return batch.id;
 }
 
 /**
@@ -29,7 +103,7 @@ export interface HermesDeps {
  * BullMQ retry can claim it again.
  */
 export function createHermesProcessor(deps: HermesDeps) {
-  const { prisma, config, publisher } = deps;
+  const { prisma, config, publisher, queues } = deps;
 
   return async (job: Job<HermesJobData>, token?: string): Promise<void> => {
     const { vehicleId, nonce } = job.data;
@@ -47,6 +121,10 @@ export function createHermesProcessor(deps: HermesDeps) {
     }
     if (nonce !== vehicle.dispatchNonce) {
       logger.info({ vehicleId, jobNonce: nonce, currentNonce: vehicle.dispatchNonce }, "Stale Hermes job dropped");
+      return;
+    }
+    if (vehicle.stockingBatchId) {
+      logger.info({ vehicleId, batchId: vehicle.stockingBatchId }, "Standalone job replaced by store batch");
       return;
     }
 
@@ -86,6 +164,19 @@ export function createHermesProcessor(deps: HermesDeps) {
         "Hermes desktop busy; dispatch delayed",
       );
       throw new DelayedError();
+    }
+
+    if (queues) {
+      const batchId = await assembleDueStoreBatch(
+        prisma,
+        queues,
+        vehicle.storeId,
+        vehicle.store.name,
+      );
+      if (batchId) {
+        logger.info({ vehicleId, batchId, storeId: vehicle.storeId }, "Due store vehicles assembled into batch");
+        return;
+      }
     }
 
     const requestId = `${vehicle.id}:${vehicle.dispatchNonce}`;
