@@ -43,12 +43,12 @@ limits, pino with secret redaction.
 
 ### apps/worker — BullMQ
 
-- **freight-check queue.** Loads a *fresh* workbook every run
-  (`DISPATCH_WORKBOOK_URL` or `_PATH`), parses it (`@lacity/freight`), computes
-  freight. Found → `READY` + enqueue Hermes dispatch. Miss → `AWAITING_FREIGHT`
-  with exponential backoff (base 5 min, doubling, cap 6 h) until
-  `FREIGHT_MAX_ATTEMPTS` (20) → `ACTION_REQUIRED`. Workbook/infra errors do not
-  consume attempts; they reschedule in 5 min and leave a timeline event.
+- **freight-check queue.** Loads a *fresh* workbook
+  (`DISPATCH_WORKBOOK_URL` or `_PATH`), parses it (`@lacity/freight`), and computes
+  freight. Found → `READY` + enqueue Hermes dispatch. Unmatched VINs remain in
+  `AWAITING_FREIGHT` and are reconciled from one shared fresh workbook snapshot
+  at 8 AM and 8 PM Eastern. Workbook/infra errors leave the vehicles parked and
+  record a timeline event; freight is never estimated.
 - **hermes-dispatch queue.** Claims the vehicle with a conditional update
   (`status=READY AND hermesDispatchedAt IS NULL`) *before* any network call —
   this is the idempotency/concurrency guard; BullMQ job IDs

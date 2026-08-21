@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   enqueueFreightCheck,
+  enqueueFreightSweep,
   enqueueHermesDispatch,
   enqueueBatchHermesDispatch,
   enqueueBatchFreightCheck,
@@ -42,6 +43,16 @@ describe("queue job IDs", () => {
       "check",
       { vehicleId, nonce: 2, attempt: 3 },
       expect.objectContaining({ jobId: `freight-${vehicleId}-2-3` }),
+    );
+  });
+
+  it("queues an immediate whole-queue freight sweep", async () => {
+    const queues = mockQueues();
+    await enqueueFreightSweep(queues);
+    expect(queues.freight.add).toHaveBeenCalledWith(
+      "sweep",
+      { sweep: true, nonce: 0, attempt: 0 },
+      expect.objectContaining({ jobId: expect.stringMatching(/^freight-sweep-manual-/) }),
     );
   });
 

@@ -2,19 +2,16 @@ import type { Job } from "bullmq";
 import type { Redis } from "ioredis";
 import { transitionVehicle, type PrismaClient } from "@lacity/database";
 import { calculateFreight } from "@lacity/freight";
-import { freightBackoffMs } from "@lacity/shared";
 import type { WorkerConfig } from "../config";
+import { nextFreightSweepHint } from "../freightSchedule";
 import { logger } from "../logger";
 import { publishVehicle } from "../publish";
 import {
-  enqueueBatchFreightCheck,
   enqueueBatchHermesDispatch,
   type FreightJobData,
   type WorkerQueues,
 } from "../queues";
 import { loadDispatchWorkbookForBatch, WorkbookSourceError } from "../workbookSource";
-
-const SOURCE_ERROR_RETRY_MS = 5 * 60 * 1000;
 
 interface BatchFreightDeps {
   prisma: PrismaClient;
@@ -27,7 +24,7 @@ interface BatchFreightDeps {
 export function createBatchFreightProcessor(deps: BatchFreightDeps) {
   const { prisma, config, publisher, queues } = deps;
   return async (job: Job<FreightJobData>): Promise<void> => {
-    const { batchId, attempt } = job.data;
+    const { batchId } = job.data;
     if (!batchId) return;
     const batch = await prisma.stockingBatch.findUnique({
       where: { id: batchId },
@@ -53,15 +50,14 @@ export function createBatchFreightProcessor(deps: BatchFreightDeps) {
           message: `Workbook unavailable: ${message}`,
         })),
       });
-      await enqueueBatchFreightCheck(queues, batch.id, {
-        attempt,
-        delayMs: SOURCE_ERROR_RETRY_MS,
+      await prisma.vehicle.updateMany({
+        where: { id: { in: batch.vehicles.map((vehicle) => vehicle.id) } },
+        data: { nextFreightCheckAt: nextFreightSweepHint() },
       });
       return;
     }
 
     let foundCount = 0;
-    let nextDelay: number | null = null;
     for (const vehicle of batch.vehicles) {
       const result = calculateFreight(snapshot.rows, vehicle.vin);
       if (result.found) {
@@ -82,36 +78,17 @@ export function createBatchFreightProcessor(deps: BatchFreightDeps) {
       }
 
       const attempts = vehicle.freightAttempts + 1;
-      if (attempts >= config.FREIGHT_MAX_ATTEMPTS) {
-        const updated = await transitionVehicle(prisma, vehicle.id, "ACTION_REQUIRED", {
-          eventType: "FREIGHT_EXHAUSTED",
-          message: `Freight not found after ${attempts} batch checks (${result.reason})`,
-          payload: { reason: result.reason, detail: result.detail, attempts, batchId },
-          data: {
-            freightAttempts: attempts,
-            nextFreightCheckAt: null,
-            failureReason: `Freight not found after ${attempts} checks: ${result.detail}`,
-          },
-        });
-        await publishVehicle(publisher, updated);
-        continue;
-      }
-      const delayMs = freightBackoffMs(
-        attempts,
-        config.FREIGHT_BACKOFF_BASE_MS,
-        config.FREIGHT_BACKOFF_MAX_MS,
-      );
       const updated = await transitionVehicle(prisma, vehicle.id, "AWAITING_FREIGHT", {
         eventType: "BATCH_FREIGHT_MISS",
-        message: `${result.reason}: ${result.detail}. Batch recheck in ${Math.round(delayMs / 60000)} min.`,
+        message: `${result.reason}: ${result.detail}. Remaining in the twice-daily freight queue; freight was not estimated.`,
         payload: { reason: result.reason, detail: result.detail, attempt: attempts, batchId },
         data: {
           freightAttempts: attempts,
-          nextFreightCheckAt: new Date(Date.now() + delayMs),
+          nextFreightCheckAt: nextFreightSweepHint(),
+          failureReason: null,
         },
       });
       await publishVehicle(publisher, updated);
-      nextDelay = nextDelay === null ? delayMs : Math.min(nextDelay, delayMs);
     }
 
     if (foundCount > 0 && batch.status !== "PROCESSING") {
@@ -120,9 +97,6 @@ export function createBatchFreightProcessor(deps: BatchFreightDeps) {
         data: { status: "READY", dispatchNonce: { increment: 1 } },
       });
       await enqueueBatchHermesDispatch(queues, queued.id, queued.dispatchNonce, queued.scheduledStartAt);
-    }
-    if (nextDelay !== null) {
-      await enqueueBatchFreightCheck(queues, batch.id, { attempt: attempt + 1, delayMs: nextDelay });
     }
     logger.info({ batchId, checked: batch.vehicles.length, found: foundCount }, "Batch freight snapshot applied");
   };

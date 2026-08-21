@@ -12,15 +12,16 @@
 
 ### Vehicle stuck in AWAITING_FREIGHT
 The VIN is not on the dispatch workbook (or its rows are cancelled, its load has
-no/conflicting prices — the timeline event names the exact reason). The system
-retries automatically with backoff and will surface `ACTION_REQUIRED` after 20
-checks. Fix the workbook (or the VIN, via intake correction + retry); the next
-check picks it up. **The system never estimates freight** — do not look for an
-override; there deliberately isn't one.
+no/conflicting prices — the timeline event names the exact reason). The vehicle
+stays in `AWAITING_FREIGHT`; the full waiting queue is checked at 8 AM and 8 PM
+Eastern every day. Fix the workbook (or the VIN, via intake correction + retry);
+the next sweep picks it up. **The system never estimates freight** — do not look
+for an override; there deliberately isn't one.
 
 ### Workbook unreachable / unparseable
-Timeline shows `FREIGHT_CHECK_ERROR`; checks reschedule every 5 minutes without
-consuming attempts. Verify `DISPATCH_WORKBOOK_URL`/`_PATH` and that the file has
+Timeline shows `FREIGHT_CHECK_ERROR` or `FREIGHT_SWEEP_ERROR`; vehicles stay parked
+for the next twice-daily sweep without estimating a fee. Verify
+`DISPATCH_WORKBOOK_URL`/`_PATH` and that the file has
 VIN / Load ID / Load Price headers (names, not letters, are matched).
 
 ### Hermes unreachable

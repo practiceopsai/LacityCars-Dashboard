@@ -93,7 +93,7 @@ Names live in [.env.example](.env.example) — values never belong in the repo.
 | Service | Variables |
 | --- | --- |
 | api | `DATABASE_URL`, `REDIS_URL`, `API_PORT`, `WEB_ORIGIN`, `SESSION_SECRET`, `OPERATOR_PASSWORD`, `HERMES_WEBHOOK_SECRET` |
-| worker | `DATABASE_URL`, `REDIS_URL`, `HERMES_ENDPOINT`, optional `HERMES_LOCAL_WEBHOOK_URL`, `HERMES_TRIGGER_SECRET`, optional `HERMES_PROXY_TOKEN`, `PUBLIC_API_URL`, `DISPATCH_WORKBOOK_URL` *or* `DISPATCH_WORKBOOK_PATH`, `FREIGHT_MAX_ATTEMPTS`, `FREIGHT_BACKOFF_BASE_MS`, `FREIGHT_BACKOFF_MAX_MS` |
+| worker | `DATABASE_URL`, `REDIS_URL`, `HERMES_ENDPOINT`, optional `HERMES_LOCAL_WEBHOOK_URL`, `HERMES_TRIGGER_SECRET`, optional `HERMES_PROXY_TOKEN`, `PUBLIC_API_URL`, `DISPATCH_WORKBOOK_URL` *or* `DISPATCH_WORKBOOK_PATH`, optional `FREIGHT_SWEEP_CRON` (default `0 8,20 * * *`) and `FREIGHT_SWEEP_TIME_ZONE` (default `America/New_York`) |
 | web | `API_URL` (internal URL of the API; used by the `/api/*` rewrite, needed at build time) |
 
 ## Railway deployment

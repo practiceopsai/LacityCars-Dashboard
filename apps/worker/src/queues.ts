@@ -5,10 +5,12 @@ import { FREIGHT_QUEUE, HERMES_QUEUE } from "@lacity/shared";
 // Allow concurrent freight checks from the same upload to settle so the first
 // due dispatch can assemble the whole store into one AutoSoft session.
 export const AUTO_BATCH_SETTLE_MS = 30_000;
+export const FREIGHT_SWEEP_SCHEDULER_ID = "freight-twice-daily";
 
 export interface FreightJobData {
   vehicleId?: string;
   batchId?: string;
+  sweep?: boolean;
   nonce: number;
   attempt: number;
 }
@@ -108,6 +110,36 @@ export async function enqueueBatchFreightCheck(
       delay: opts.delayMs ?? 0,
       removeOnComplete: 1000,
       removeOnFail: 1000,
+    },
+  );
+}
+
+/** Queue an immediate reconciliation of every vehicle still waiting on freight. */
+export async function enqueueFreightSweep(queues: WorkerQueues): Promise<void> {
+  await queues.freight.add(
+    "sweep",
+    { sweep: true, nonce: 0, attempt: 0 },
+    {
+      jobId: `freight-sweep-manual-${Date.now()}`,
+      removeOnComplete: 1000,
+      removeOnFail: 1000,
+    },
+  );
+}
+
+/** Keep one durable BullMQ scheduler for the configured twice-daily checks. */
+export async function ensureFreightSweepSchedule(
+  queues: WorkerQueues,
+  pattern: string,
+  timezone: string,
+): Promise<void> {
+  await queues.freight.upsertJobScheduler(
+    FREIGHT_SWEEP_SCHEDULER_ID,
+    { pattern, tz: timezone },
+    {
+      name: "sweep",
+      data: { sweep: true, nonce: 0, attempt: 0 },
+      opts: { removeOnComplete: 1000, removeOnFail: 1000 },
     },
   );
 }

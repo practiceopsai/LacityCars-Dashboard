@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   enqueueFreightCheck,
+  enqueueFreightSweep,
   enqueueHermesDispatch,
+  ensureFreightSweepSchedule,
   AUTO_BATCH_SETTLE_MS,
   freightJobId,
   hermesJobId,
@@ -10,7 +12,10 @@ import {
 
 function mockQueues() {
   return {
-    freight: { add: vi.fn().mockResolvedValue(undefined) },
+    freight: {
+      add: vi.fn().mockResolvedValue(undefined),
+      upsertJobScheduler: vi.fn().mockResolvedValue(undefined),
+    },
     hermes: { add: vi.fn().mockResolvedValue(undefined) },
     close: vi.fn().mockResolvedValue(undefined),
   } as unknown as WorkerQueues;
@@ -48,5 +53,21 @@ describe("queue job IDs", () => {
     );
     const options = vi.mocked(queues.hermes.add).mock.calls[0]![2]!;
     expect(options.delay).toBeGreaterThanOrEqual(AUTO_BATCH_SETTLE_MS - 1000);
+  });
+
+  it("registers the twice-daily scheduler and supports an immediate sweep", async () => {
+    const queues = mockQueues();
+    await ensureFreightSweepSchedule(queues, "0 8,20 * * *", "America/New_York");
+    await enqueueFreightSweep(queues);
+    expect(queues.freight.upsertJobScheduler).toHaveBeenCalledWith(
+      "freight-twice-daily",
+      { pattern: "0 8,20 * * *", tz: "America/New_York" },
+      expect.objectContaining({ name: "sweep", data: { sweep: true, nonce: 0, attempt: 0 } }),
+    );
+    expect(queues.freight.add).toHaveBeenCalledWith(
+      "sweep",
+      { sweep: true, nonce: 0, attempt: 0 },
+      expect.objectContaining({ jobId: expect.stringMatching(/^freight-sweep-manual-/) }),
+    );
   });
 });

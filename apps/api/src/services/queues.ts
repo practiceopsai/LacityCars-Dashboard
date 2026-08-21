@@ -7,6 +7,7 @@ const AUTO_BATCH_SETTLE_MS = 30_000;
 export interface FreightJobData {
   vehicleId?: string;
   batchId?: string;
+  sweep?: boolean;
   nonce: number;
   attempt: number;
 }
@@ -107,6 +108,19 @@ export async function enqueueBatchFreightCheck(
     {
       jobId: batchFreightJobId(batchId, opts.attempt),
       delay: opts.delayMs ?? 0,
+      removeOnComplete: 1000,
+      removeOnFail: 1000,
+    },
+  );
+}
+
+/** Queue an operator-requested reconciliation of every vehicle waiting on freight. */
+export async function enqueueFreightSweep(queues: Queues): Promise<void> {
+  await queues.freight.add(
+    "sweep",
+    { sweep: true, nonce: 0, attempt: 0 },
+    {
+      jobId: `freight-sweep-manual-${Date.now()}`,
       removeOnComplete: 1000,
       removeOnFail: 1000,
     },

@@ -17,6 +17,7 @@ import { publishVehicleUpdate } from "../services/publish";
 import {
   enqueueBatchHermesDispatch,
   enqueueFreightCheck,
+  enqueueFreightSweep,
   enqueueHermesDispatch,
   type Queues,
 } from "../services/queues";
@@ -184,6 +185,16 @@ export function vehiclesRouter(
       res.setHeader("Content-Type", "text/csv; charset=utf-8");
       res.setHeader("Content-Disposition", 'attachment; filename="completed-ledger.csv"');
       res.send("﻿" + lines.join("\r\n") + "\r\n");
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /** Operator-triggered reconciliation of every vehicle still waiting on freight. */
+  router.post("/freight-sweep", guards.limiter, guards.csrf, async (_req, res, next) => {
+    try {
+      await enqueueFreightSweep(queues);
+      res.status(202).json({ queued: true, message: "Freight reconciliation queued" });
     } catch (err) {
       next(err);
     }

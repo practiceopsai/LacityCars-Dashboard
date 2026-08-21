@@ -31,7 +31,7 @@ function makeJob(): Job<FreightJobData> {
 beforeEach(() => vi.clearAllMocks());
 
 describe("batch freight check", () => {
-  it("uses one fresh snapshot for all unresolved VINs and queues ready plus retry work", async () => {
+  it("uses one fresh snapshot, queues ready work, and parks unresolved VINs for the sweep", async () => {
     const vehicles = [
       { id: "veh-1", vin: "VIN1", status: "PENDING", freightAttempts: 0, store: {} },
       { id: "veh-2", vin: "VIN2", status: "PENDING", freightAttempts: 0, store: {} },
@@ -85,6 +85,6 @@ describe("batch freight check", () => {
     expect(loadDispatchWorkbookForBatch).toHaveBeenCalledOnce();
     expect(calculateFreight).toHaveBeenCalledTimes(2);
     expect(queues.hermes.add).toHaveBeenCalledOnce();
-    expect(queues.freight.add).toHaveBeenCalledOnce();
+    expect(queues.freight.add).not.toHaveBeenCalled();
   });
 });

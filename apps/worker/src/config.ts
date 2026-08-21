@@ -20,6 +20,8 @@ const EnvSchema = z
     FREIGHT_MAX_ATTEMPTS: z.coerce.number().int().min(1).default(DEFAULT_FREIGHT_MAX_ATTEMPTS),
     FREIGHT_BACKOFF_BASE_MS: z.coerce.number().int().min(1000).default(DEFAULT_FREIGHT_BACKOFF_BASE_MS),
     FREIGHT_BACKOFF_MAX_MS: z.coerce.number().int().min(1000).default(DEFAULT_FREIGHT_BACKOFF_MAX_MS),
+    FREIGHT_SWEEP_CRON: z.string().min(1).default("0 8,20 * * *"),
+    FREIGHT_SWEEP_TIME_ZONE: z.string().min(1).default("America/New_York"),
     HERMES_TIMEOUT_MS: z.coerce.number().int().min(1000).default(30_000),
     HERMES_BUSY_DELAY_MS: z.coerce.number().int().min(5_000).default(30_000),
     HERMES_PROCESSING_TIMEOUT_MS: z.coerce.number().int().min(60_000).default(5_400_000),

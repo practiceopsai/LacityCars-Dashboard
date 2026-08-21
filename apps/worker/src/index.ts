@@ -6,9 +6,15 @@ import { loadConfig } from "./config";
 import { logger } from "./logger";
 import { createFreightProcessor } from "./processors/freightCheck";
 import { createBatchFreightProcessor } from "./processors/batchFreightCheck";
+import { createFreightSweepProcessor } from "./processors/freightSweep";
 import { createHermesProcessor } from "./processors/hermesDispatch";
 import { createBatchDispatchProcessor } from "./processors/batchDispatch";
-import { createWorkerQueues, type FreightJobData, type HermesJobData } from "./queues";
+import {
+  createWorkerQueues,
+  ensureFreightSweepSchedule,
+  type FreightJobData,
+  type HermesJobData,
+} from "./queues";
 import { recoverStaleBatches, recoverStaleProcessing } from "./staleProcessing";
 
 async function main(): Promise<void> {
@@ -20,9 +26,15 @@ async function main(): Promise<void> {
 
   const vehicleFreight = createFreightProcessor({ prisma, config, publisher, queues });
   const batchFreight = createBatchFreightProcessor({ prisma, config, publisher, queues });
+  const freightSweep = createFreightSweepProcessor({ prisma, config, publisher, queues });
+  await ensureFreightSweepSchedule(
+    queues,
+    config.FREIGHT_SWEEP_CRON,
+    config.FREIGHT_SWEEP_TIME_ZONE,
+  );
   const freightWorker = new Worker<FreightJobData>(
     FREIGHT_QUEUE,
-    (job) => (job.data.batchId ? batchFreight(job) : vehicleFreight(job)),
+    (job) => (job.data.sweep ? freightSweep(job) : job.data.batchId ? batchFreight(job) : vehicleFreight(job)),
     { connection, concurrency: 5 },
   );
   const vehicleDispatch = createHermesProcessor({ prisma, config, publisher, queues });
@@ -46,7 +58,10 @@ async function main(): Promise<void> {
     });
   }
 
-  logger.info("Worker online: freight-check + hermes-dispatch");
+  logger.info(
+    { freightSweepCron: config.FREIGHT_SWEEP_CRON, freightSweepTimeZone: config.FREIGHT_SWEEP_TIME_ZONE },
+    "Worker online: freight-check + twice-daily sweep + hermes-dispatch",
+  );
 
   const runWatchdog = (): void => {
     void (async () => {
