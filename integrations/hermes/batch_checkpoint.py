@@ -134,6 +134,10 @@ def relative_to_root(path: Path, root: Path) -> str:
 
 
 def callback(args: argparse.Namespace) -> int:
+    callback_output = args.callback_output.resolve()
+    rag_root = args.rag_root.resolve()
+    if callback_output.is_relative_to(rag_root):
+        raise ValueError("callback output must be outside the RAG Git working tree")
     checkpoint = read_object(args.checkpoint)
     manifest = read_object(args.manifest)
     find_vehicle(manifest, str(checkpoint.get("request_id") or ""), str(checkpoint.get("vin") or ""))
@@ -162,7 +166,7 @@ def callback(args: argparse.Namespace) -> int:
     else:
         payload["failure_reason"] = checkpoint["failure_reason"]
         payload["failure_scope"] = checkpoint.get("failure_scope", "VEHICLE")
-    atomic_json(args.callback_output, payload)
+    atomic_json(callback_output, payload)
     print(json.dumps({"callback_ready": True, "status": payload["status"], "vin": payload["vin"]}))
     return 0
 

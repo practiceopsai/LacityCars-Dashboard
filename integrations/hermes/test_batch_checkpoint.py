@@ -91,7 +91,7 @@ def test_callback_uses_committed_checkpoint_and_git_head(tmp_path: Path) -> None
     subprocess.run(["git", "-C", str(tmp_path), "add", "manifest.json", "checkpoint.json"], check=True)
     subprocess.run(["git", "-C", str(tmp_path), "commit", "-qm", "checkpoint"], check=True)
 
-    callback_path = tmp_path / "callback.json"
+    callback_path = tmp_path.parent / f"{tmp_path.name}-callback.json"
     result = batch_checkpoint.callback(
         Namespace(
             manifest=args.manifest,
@@ -107,3 +107,26 @@ def test_callback_uses_committed_checkpoint_and_git_head(tmp_path: Path) -> None
     assert payload["rag_commit_id"] == subprocess.check_output(
         ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], text=True
     ).strip()
+
+
+def test_callback_rejects_output_inside_rag_tree(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "Test"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "test@example.com"], check=True)
+    write_manifest(tmp_path / "manifest.json")
+    args = record_args(tmp_path)
+    batch_checkpoint.record(args)
+    subprocess.run(["git", "-C", str(tmp_path), "add", "manifest.json", "checkpoint.json"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "commit", "-qm", "checkpoint"], check=True)
+
+    with pytest.raises(ValueError, match="outside the RAG Git working tree"):
+        batch_checkpoint.callback(
+            Namespace(
+                manifest=args.manifest,
+                checkpoint=args.checkpoint_output,
+                callback_output=tmp_path / "callback.json",
+                rag_root=tmp_path,
+            )
+        )
+
+    assert not (tmp_path / "callback.json").exists()
