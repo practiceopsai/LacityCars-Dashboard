@@ -7,6 +7,7 @@ import {
   type InternalCharge,
 } from "@lacity/shared";
 import type { WorkerConfig } from "../config";
+import { acquireDesktopDispatchLock } from "../desktopDispatchLock";
 import { triggerHermes } from "../hermesClient";
 import { logger } from "../logger";
 import type { HermesJobData } from "../queues";
@@ -89,7 +90,7 @@ export function fitHermesVehicleManifest<T>(records: T[]): T[] {
  * checkpoints each vehicle through the existing per-VIN callback endpoint.
  */
 export function createBatchDispatchProcessor(deps: BatchDispatchDeps) {
-  const { prisma, config } = deps;
+  const { prisma, config, publisher } = deps;
 
   return async (job: Job<HermesJobData>, token?: string): Promise<void> => {
     const { batchId, nonce } = job.data;
@@ -117,6 +118,18 @@ export function createBatchDispatchProcessor(deps: BatchDispatchDeps) {
       await job.moveToDelayed(batch.scheduledStartAt.getTime(), token);
       throw new DelayedError();
     }
+
+    const desktopLock = await acquireDesktopDispatchLock(
+      publisher,
+      `batch:${batchId}:${job.id ?? nonce}`,
+    );
+    if (!desktopLock) {
+      await job.moveToDelayed(Date.now() + config.HERMES_BUSY_DELAY_MS, token);
+      logger.info({ batchId }, "Hermes desktop claim busy; batch dispatch delayed");
+      throw new DelayedError();
+    }
+
+    try {
 
     const [activeVehicle, activeBatch] = await Promise.all([
       prisma.vehicle.findFirst({ where: { status: "PROCESSING" }, select: { id: true } }),
@@ -244,6 +257,9 @@ export function createBatchDispatchProcessor(deps: BatchDispatchDeps) {
         });
       });
       throw error;
+    }
+    } finally {
+      await desktopLock.release();
     }
   };
 }

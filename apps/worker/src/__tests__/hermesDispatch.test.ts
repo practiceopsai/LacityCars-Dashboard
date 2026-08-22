@@ -79,7 +79,14 @@ function makeJob(): Job<HermesJobData> {
   } as unknown as Job<HermesJobData>;
 }
 
-const publisher = {} as Redis;
+function publisherMock(acquired: "OK" | null = "OK"): Redis {
+  return {
+    set: vi.fn().mockResolvedValue(acquired),
+    eval: vi.fn().mockResolvedValue(1),
+  } as unknown as Redis;
+}
+
+const publisher = publisherMock();
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -126,6 +133,22 @@ describe("createHermesProcessor", () => {
       prisma: prisma as unknown as PrismaClient,
       config,
       publisher,
+    });
+
+    await expect(processor(job, "worker-token")).rejects.toBeInstanceOf(DelayedError);
+
+    expect(job.moveToDelayed).toHaveBeenCalledWith(expect.any(Number), "worker-token");
+    expect(prisma.vehicle.updateMany).not.toHaveBeenCalled();
+    expect(triggerHermes).not.toHaveBeenCalled();
+  });
+
+  it("delays without claiming when another worker replica owns the desktop claim lock", async () => {
+    const prisma = makePrisma(makeVehicle(), 1);
+    const job = makeJob();
+    const processor = createHermesProcessor({
+      prisma: prisma as unknown as PrismaClient,
+      config,
+      publisher: publisherMock(null),
     });
 
     await expect(processor(job, "worker-token")).rejects.toBeInstanceOf(DelayedError);

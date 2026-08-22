@@ -8,6 +8,7 @@ import {
   type InternalCharge,
 } from "@lacity/shared";
 import type { WorkerConfig } from "../config";
+import { acquireDesktopDispatchLock } from "../desktopDispatchLock";
 import { HermesTriggerError, triggerHermes } from "../hermesClient";
 import { logger } from "../logger";
 import { publishVehicle } from "../publish";
@@ -146,6 +147,18 @@ export function createHermesProcessor(deps: HermesDeps) {
       throw new DelayedError();
     }
 
+    const desktopLock = await acquireDesktopDispatchLock(
+      publisher,
+      `vehicle:${vehicleId}:${job.id ?? nonce}`,
+    );
+    if (!desktopLock) {
+      await job.moveToDelayed(Date.now() + config.HERMES_BUSY_DELAY_MS, token);
+      logger.info({ vehicleId }, "Hermes desktop claim busy; vehicle dispatch delayed");
+      throw new DelayedError();
+    }
+
+    try {
+
     // Hermes webhook deliveries use independent sessions, so the gateway can
     // run them concurrently. AutoSoft cannot. Keep later READY vehicles in the
     // BullMQ delayed set until the currently PROCESSING vehicle completes.
@@ -273,5 +286,8 @@ export function createHermesProcessor(deps: HermesDeps) {
     });
     await publishVehicle(publisher, updated);
     logger.info({ vehicleId, requestId }, "Hermes triggered");
+    } finally {
+      await desktopLock.release();
+    }
   };
 }

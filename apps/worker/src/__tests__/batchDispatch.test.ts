@@ -87,6 +87,13 @@ function job(): Job<HermesJobData> {
   } as unknown as Job<HermesJobData>;
 }
 
+function publisherMock(acquired: "OK" | null = "OK"): Redis {
+  return {
+    set: vi.fn().mockResolvedValue(acquired),
+    eval: vi.fn().mockResolvedValue(1),
+  } as unknown as Redis;
+}
+
 beforeEach(() => vi.clearAllMocks());
 
 describe("batch dispatch", () => {
@@ -135,7 +142,7 @@ describe("batch dispatch", () => {
     const processor = createBatchDispatchProcessor({
       prisma: prisma as unknown as PrismaClient,
       config,
-      publisher: {} as Redis,
+      publisher: publisherMock(),
     });
     await expect(processor(queued, "token")).rejects.toBeInstanceOf(DelayedError);
     expect(queued.moveToDelayed).toHaveBeenCalledWith(start.getTime(), "token");
@@ -147,7 +154,7 @@ describe("batch dispatch", () => {
     const processor = createBatchDispatchProcessor({
       prisma: prisma as unknown as PrismaClient,
       config,
-      publisher: {} as Redis,
+      publisher: publisherMock(),
     });
     await processor(job());
     expect(triggerHermes).toHaveBeenCalledOnce();
@@ -179,7 +186,7 @@ describe("batch dispatch", () => {
     const processor = createBatchDispatchProcessor({
       prisma: prisma as unknown as PrismaClient,
       config,
-      publisher: {} as Redis,
+      publisher: publisherMock(),
     });
     await processor(job());
     const payload = vi.mocked(triggerHermes).mock.calls[0]![1];
@@ -192,10 +199,26 @@ describe("batch dispatch", () => {
     const processor = createBatchDispatchProcessor({
       prisma: prisma as unknown as PrismaClient,
       config,
-      publisher: {} as Redis,
+      publisher: publisherMock(),
     });
     await processor(job());
     const payload = vi.mocked(triggerHermes).mock.calls[0]![1];
     expect("vehicles" in payload ? payload.vehicles : []).toHaveLength(1);
+  });
+
+  it("delays without claiming when another worker replica owns the desktop claim lock", async () => {
+    const prisma = prismaMock(batch());
+    const queued = job();
+    const processor = createBatchDispatchProcessor({
+      prisma: prisma as unknown as PrismaClient,
+      config,
+      publisher: publisherMock(null),
+    });
+
+    await expect(processor(queued, "worker-token")).rejects.toBeInstanceOf(DelayedError);
+
+    expect(queued.moveToDelayed).toHaveBeenCalledWith(expect.any(Number), "worker-token");
+    expect(prisma.stockingBatch.updateMany).not.toHaveBeenCalled();
+    expect(triggerHermes).not.toHaveBeenCalled();
   });
 });
