@@ -32,7 +32,10 @@ export const ALLOWED_TRANSITIONS: Record<VehicleStatus, readonly VehicleStatus[]
   // Self-transition = idempotent PROCESSING progress callbacks.
   PROCESSING: ["PROCESSING", "COMPLETED", "ACTION_REQUIRED", "FAILED"],
   ACTION_REQUIRED: ["AWAITING_FREIGHT", "READY", "FAILED"],
-  FAILED: ["AWAITING_FREIGHT", "READY"],
+  // FAILED -> COMPLETED reconciles a late, signed terminal callback after the
+  // live AutoSoft post succeeded but a timeout/store-wide failure marked the
+  // dashboard stale. The HMAC callback remains the required evidence path.
+  FAILED: ["AWAITING_FREIGHT", "READY", "COMPLETED"],
   COMPLETED: [],
 };
 

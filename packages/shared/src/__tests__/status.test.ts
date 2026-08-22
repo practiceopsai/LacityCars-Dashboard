@@ -59,6 +59,7 @@ describe("state machine", () => {
   it("supports operator retry from FAILED and ACTION_REQUIRED", () => {
     expect(canTransition("FAILED", "AWAITING_FREIGHT")).toBe(true);
     expect(canTransition("FAILED", "READY")).toBe(true);
+    expect(canTransition("FAILED", "COMPLETED")).toBe(true);
     expect(canTransition("ACTION_REQUIRED", "AWAITING_FREIGHT")).toBe(true);
     expect(canTransition("ACTION_REQUIRED", "READY")).toBe(true);
     expect(RETRYABLE_STATUSES).toContain("FAILED");
