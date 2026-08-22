@@ -164,7 +164,7 @@ $scheduleBlock = @'
 ## Scheduled stocking boundary
 
 - Every dashboard `vehicle.ready` payload includes `schedule.starts_at` as an ISO 8601 instant plus Eastern and Pacific display labels. The UTC instant is authoritative; the labels are operator-readable context.
-- `schedule.starts_at` is a hard not-before boundary for all live stocking work because AutoSoft is shared. Independently compare the current time with it before opening or changing the stock sheet, NextGear, AutoSoft, or another live stocking system.
+- `schedule.starts_at` is a hard not-before boundary for all live stocking work because AutoSoft is shared. The worker already delays webhook delivery until that boundary. Independently verify it once using a fresh UTC clock command executed in the current webhook session immediately after writing `vehicle-stock-in/active-request.json`. Never reuse a timestamp from an earlier run, result, checkpoint, RAG excerpt, file, or model context; if an older artifact disagrees, the fresh clock is authoritative. Compare that value before opening or changing the stock sheet, NextGear, AutoSoft, or another live stocking system.
 - If a trigger arrives early, fail closed: make no live-system changes and report the premature trigger. Never wait inside or hold open the shared AutoSoft session until the scheduled time.
 - A scheduled time does not permit concurrency. Continue to process one dashboard vehicle at a time, and let later scheduled vehicles remain queued while another run owns the desktop.
 - Store scheduling instants in UTC and show both America/New_York (Eastern) and America/Los_Angeles (Pacific), using their date-specific daylight-saving abbreviations.
