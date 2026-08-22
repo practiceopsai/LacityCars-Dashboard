@@ -8,10 +8,7 @@ import {
 } from "../staleProcessing";
 import type { WorkerQueues } from "../queues";
 
-vi.mock("../queues", async (importOriginal) => {
-  const original = await importOriginal<typeof import("../queues")>();
-  return { ...original, enqueueBatchHermesDispatch: vi.fn() };
-});
+vi.mock("../queues", () => ({ enqueueBatchHermesDispatch: vi.fn() }));
 import { enqueueBatchHermesDispatch } from "../queues";
 
 beforeEach(() => vi.clearAllMocks());
