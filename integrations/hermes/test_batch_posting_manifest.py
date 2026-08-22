@@ -80,6 +80,20 @@ internals:
         with self.assertRaisesRegex(ValueError, "verified color is required"):
             target.build(self.args())
 
+    def test_autosoft_source_is_stable_and_never_exceeds_field_limit(self):
+        self.assertEqual(
+            target.source_for_autosoft("Manheim Southern California (SCAA)"),
+            "MANHEIM SOUTHERN CA",
+        )
+        self.assertEqual(
+            target.source_for_autosoft("A Very Long Auction Source Name"),
+            "A VERY LONG AUCTION",
+        )
+        self.assertLessEqual(
+            len(target.source_for_autosoft("A Very Long Auction Source Name")),
+            20,
+        )
+
     def test_uses_la_sheet_layout_without_shifting_mileage_into_color(self):
         validation = json.loads(self.validation.read_text(encoding="utf-8"))
         validation["sheet"]["candidates"][0].update({

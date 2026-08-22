@@ -17,9 +17,12 @@ from typing import Any
 
 PASSENGER_CAR = "PASSENGER CAR"
 SOURCE_ALIASES = {
+    "MANHEIM SOUTHERN CALIFORNIA": "MANHEIM SOUTHERN CA",
+    "MANHEIM SOUTHERN CALIFORNIA (SCAA)": "MANHEIM SOUTHERN CA",
     "SOUTH FLORIDA AUTO AUCTION OF FT. LAUDERDALE, LLC": "S FL AUTO AUCTION",
     "MYCENTRALAUCTION": "MY CENTRAL AUCTION",
 }
+AUTOSOFT_SOURCE_MAX_LENGTH = 20
 
 
 def read_object(path: Path) -> dict[str, Any]:
@@ -163,7 +166,7 @@ def source_for_autosoft(value: str) -> str:
         return SOURCE_ALIASES[upper]
     upper = upper.replace(" AUCTION OF ", " AUCTION ").replace(" AUTO AUCTION", " AUTO AUCTION")
     upper = re.sub(r"\bLIMITED LIABILITY COMPANY\b|\bLLC\b", "", upper)
-    return re.sub(r"\s+", " ", upper).strip()[:25]
+    return re.sub(r"\s+", " ", upper).strip()[:AUTOSOFT_SOURCE_MAX_LENGTH].rstrip()
 
 
 def parse_pairs(values: list[str]) -> dict[str, str]:

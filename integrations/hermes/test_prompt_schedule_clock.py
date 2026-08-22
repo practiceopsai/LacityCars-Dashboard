@@ -25,6 +25,37 @@ class PromptScheduleClockTests(unittest.TestCase):
         self.assertIn("accepted terminal callback is the final side effect", configure)
         self.assertIn("call no more tools", configure)
 
+    def test_autosoft_currency_uses_dollar_values_not_implied_cents(self) -> None:
+        prompt = (ROOT / "vehicle-ready-prompt.txt").read_text(encoding="utf-8")
+        configure = (ROOT / "configure_orgo_webhook.ps1").read_text(encoding="utf-8")
+        for policy in (prompt, configure):
+            self.assertIn("currency fields accept ordinary dollar values", policy)
+            self.assertIn("`500.00` is typed as `500.00`, never `50000`", policy)
+            self.assertNotIn("currency fields use implied cents", policy)
+
+    def test_autosoft_readback_ignores_adjacent_line_selector_default(self) -> None:
+        prompt = (ROOT / "vehicle-ready-prompt.txt").read_text(encoding="utf-8")
+        configure = (ROOT / "configure_orgo_webhook.ps1").read_text(encoding="utf-8")
+        for policy in (prompt, configure):
+            self.assertIn("9C 24300 USED CAR", policy)
+            self.assertIn("two authoritative Line", policy)
+            self.assertIn("saved Line or GL", policy)
+
+    def test_post_save_reset_and_source_limit_are_explicit(self) -> None:
+        prompt = (ROOT / "vehicle-ready-prompt.txt").read_text(encoding="utf-8")
+        configure = (ROOT / "configure_orgo_webhook.ps1").read_text(encoding="utf-8")
+        for policy in (prompt, configure):
+            self.assertIn("clean blank Vehicle Purchases form", policy)
+            self.assertIn("Source accepts at most 20 characters", policy)
+            self.assertIn("source_autosoft", policy)
+
+    def test_headless_checkpoint_helper_has_narrow_allowlist(self) -> None:
+        configure = (ROOT / "configure_orgo_webhook.ps1").read_text(encoding="utf-8")
+        self.assertIn(
+            "Set-ConfigValue 'command_allowlist' '[\"python tools/batch_checkpoint.py *\"]'",
+            configure,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
