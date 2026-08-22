@@ -17,9 +17,12 @@ interface BatchDispatchDeps {
   publisher: Redis;
 }
 
-// Ten compact records fit below Hermes's effective rendered-message limit
-// while still amortizing sheet and AutoSoft setup across a useful load window.
-const HERMES_BATCH_WINDOW = 10;
+// Live observation on the shared AutoSoft desktop showed that two complete
+// vehicle posts fit Hermes's 500-action ceiling reliably. A third record can
+// strand an already-created stock shell before its terminal callback. Keep
+// execution windows at two; continuation jobs reuse the same store batch,
+// sheet rows, source export, and AutoSoft instance without mixing stores.
+export const HERMES_BATCH_WINDOW = 2;
 // Hermes caps an individual rendered template value at 2,000 characters and
 // pretty-prints object/array substitutions. Budget the compact JSON much lower
 // so indentation and newline expansion cannot truncate a child record.

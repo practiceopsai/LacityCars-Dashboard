@@ -8,6 +8,7 @@ import {
   compactFreightEvidence,
   createBatchDispatchProcessor,
   fitHermesVehicleManifest,
+  HERMES_BATCH_WINDOW,
   HERMES_VEHICLES_JSON_LIMIT,
 } from "../processors/batchDispatch";
 import type { HermesJobData } from "../queues";
@@ -168,6 +169,21 @@ describe("batch dispatch", () => {
     expect(prisma.stockingBatch.updateMany).toHaveBeenCalledOnce();
     expect(prisma.vehicle.updateMany).toHaveBeenCalledTimes(2);
     expect(prisma.vehicleEvent.create).toHaveBeenCalledTimes(2);
+  });
+
+  it("caps a live execution window at the observed two-vehicle tool budget", async () => {
+    expect(HERMES_BATCH_WINDOW).toBe(2);
+    const prisma = prismaMock(
+      batch({ vehicles: [vehicle("veh-1", 1), vehicle("veh-2", 2), { ...vehicle("veh-3", 2), id: "veh-3" }] }),
+    );
+    const processor = createBatchDispatchProcessor({
+      prisma: prisma as unknown as PrismaClient,
+      config,
+      publisher: {} as Redis,
+    });
+    await processor(job());
+    const payload = vi.mocked(triggerHermes).mock.calls[0]![1];
+    expect("vehicles" in payload ? payload.vehicles : []).toHaveLength(2);
   });
 
   it("excludes vehicles without defensible freight instead of guessing", async () => {

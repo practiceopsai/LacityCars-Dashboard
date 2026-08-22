@@ -1,7 +1,20 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Redis } from "ioredis";
 import type { PrismaClient, VehicleWithStore } from "@lacity/database";
-import { recoverStaleBatches, recoverStaleProcessing } from "../staleProcessing";
+import {
+  recoverStaleBatches,
+  recoverStaleProcessing,
+  resumeUnclaimedReadyBatches,
+} from "../staleProcessing";
+import type { WorkerQueues } from "../queues";
+
+vi.mock("../queues", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../queues")>();
+  return { ...original, enqueueBatchHermesDispatch: vi.fn() };
+});
+import { enqueueBatchHermesDispatch } from "../queues";
+
+beforeEach(() => vi.clearAllMocks());
 
 const publisher = {} as Redis;
 
@@ -104,5 +117,92 @@ describe("recoverStaleBatches", () => {
       where: { id: "batch-1", status: "PROCESSING" },
       data: { status: "FAILED", hermesDispatchedAt: null },
     });
+  });
+});
+
+describe("resumeUnclaimedReadyBatches", () => {
+  it("queues only never-claimed READY children under a new nonce", async () => {
+    const safe = {
+      id: "veh-ready",
+      status: "READY",
+      hermesDispatchedAt: null,
+      freightAmount: 500,
+      freightEvidence: { loadId: "42" },
+    };
+    const prisma = {
+      stockingBatch: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: "batch-1", vehicles: [safe] },
+        ]),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          id: "batch-1",
+          dispatchNonce: 7,
+          scheduledStartAt: new Date("2026-08-22T08:25:00.000Z"),
+        }),
+      },
+      vehicleEvent: { createMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    } as unknown as PrismaClient;
+
+    const resumed = await resumeUnclaimedReadyBatches({
+      prisma,
+      publisher,
+      queues: {} as WorkerQueues,
+      timeoutMs: 60_000,
+    });
+
+    expect(resumed).toBe(1);
+    expect(prisma.stockingBatch.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "batch-1", status: { in: ["FAILED", "PARTIAL"] } },
+        data: expect.objectContaining({ status: "READY", dispatchNonce: { increment: 1 } }),
+      }),
+    );
+    expect(enqueueBatchHermesDispatch).toHaveBeenCalledWith(
+      expect.anything(),
+      "batch-1",
+      7,
+      new Date("2026-08-22T08:25:00.000Z"),
+    );
+  });
+
+  it("does not resume a batch with any claimed or processing child", async () => {
+    const prisma = {
+      stockingBatch: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "batch-1",
+            vehicles: [
+              {
+                id: "veh-claimed",
+                status: "READY",
+                hermesDispatchedAt: new Date(),
+                freightAmount: 500,
+                freightEvidence: { loadId: "42" },
+              },
+              {
+                id: "veh-safe",
+                status: "READY",
+                hermesDispatchedAt: null,
+                freightAmount: 500,
+                freightEvidence: { loadId: "42" },
+              },
+            ],
+          },
+        ]),
+        updateMany: vi.fn(),
+      },
+    } as unknown as PrismaClient;
+
+    const resumed = await resumeUnclaimedReadyBatches({
+      prisma,
+      publisher,
+      queues: {} as WorkerQueues,
+      timeoutMs: 60_000,
+    });
+
+    expect(resumed).toBe(0);
+    expect(prisma.stockingBatch.updateMany).not.toHaveBeenCalled();
+    expect(enqueueBatchHermesDispatch).not.toHaveBeenCalled();
   });
 });

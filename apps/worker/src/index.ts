@@ -15,7 +15,11 @@ import {
   type FreightJobData,
   type HermesJobData,
 } from "./queues";
-import { recoverStaleBatches, recoverStaleProcessing } from "./staleProcessing";
+import {
+  recoverStaleBatches,
+  recoverStaleProcessing,
+  resumeUnclaimedReadyBatches,
+} from "./staleProcessing";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -66,6 +70,12 @@ async function main(): Promise<void> {
   const runWatchdog = (): void => {
     void (async () => {
       await recoverStaleBatches({ prisma, publisher, timeoutMs: config.HERMES_PROCESSING_TIMEOUT_MS });
+      await resumeUnclaimedReadyBatches({
+        prisma,
+        publisher,
+        queues,
+        timeoutMs: config.HERMES_PROCESSING_TIMEOUT_MS,
+      });
       await recoverStaleProcessing({ prisma, publisher, timeoutMs: config.HERMES_PROCESSING_TIMEOUT_MS });
     })().catch((err) => logger.error({ err }, "Hermes processing watchdog failed"));
   };
