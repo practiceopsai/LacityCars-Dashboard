@@ -6,7 +6,9 @@ param(
     [string]$CallbackHelper = "$PSScriptRoot\dashboard_callback.py",
     [string]$RdpFocusHelper = "$PSScriptRoot\focus_autosoft_rdp.py",
     [string]$BatchSourceHelper = "$PSScriptRoot\batch_source_preflight.py",
-    [string]$BatchManifestHelper = "$PSScriptRoot\batch_manifest_preflight.py"
+    [string]$BatchManifestHelper = "$PSScriptRoot\batch_manifest_preflight.py",
+    [string]$BatchDecodeHelper = "$PSScriptRoot\batch_vpic_decode.py",
+    [string]$BatchCheckpointHelper = "$PSScriptRoot\batch_checkpoint.py"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,7 +16,7 @@ $hermes = Join-Path $HermesHome 'hermes-agent\bin\hermes.exe'
 $config = Join-Path $HermesHome 'config.yaml'
 $envFile = Join-Path $HermesHome '.env'
 
-foreach ($required in $hermes, $config, $envFile, $RagRoot, $PromptFile, $CallbackHelper, $RdpFocusHelper, $BatchSourceHelper, $BatchManifestHelper) {
+foreach ($required in $hermes, $config, $envFile, $RagRoot, $PromptFile, $CallbackHelper, $RdpFocusHelper, $BatchSourceHelper, $BatchManifestHelper, $BatchDecodeHelper, $BatchCheckpointHelper) {
     if (-not (Test-Path -LiteralPath $required)) { throw "Required path missing: $required" }
 }
 
@@ -125,6 +127,15 @@ Copy-Item -LiteralPath $CallbackHelper -Destination (Join-Path $toolsDir 'dashbo
 Copy-Item -LiteralPath $RdpFocusHelper -Destination (Join-Path $toolsDir 'focus_autosoft_rdp.py') -Force
 Copy-Item -LiteralPath $BatchSourceHelper -Destination (Join-Path $toolsDir 'batch_source_preflight.py') -Force
 Copy-Item -LiteralPath $BatchManifestHelper -Destination (Join-Path $toolsDir 'batch_manifest_preflight.py') -Force
+Copy-Item -LiteralPath $BatchDecodeHelper -Destination (Join-Path $toolsDir 'batch_vpic_decode.py') -Force
+Copy-Item -LiteralPath $BatchCheckpointHelper -Destination (Join-Path $toolsDir 'batch_checkpoint.py') -Force
+
+# Keep RAG checkpoint pushes non-interactive and avoid the Windows credential
+# selector that can otherwise hold the one shared desktop lease indefinitely.
+& git -C $RagRoot config credential.helper store
+& git -C $RagRoot config credential.interactive never
+& git -C $RagRoot config http.version HTTP/1.1
+if ($LASTEXITCODE -ne 0) { throw 'Failed to configure non-interactive RAG Git access' }
 
 # Workbook helpers must be ready before a timed live run. Never spend batch
 # turns discovering or installing this dependency.
@@ -168,10 +179,14 @@ $batchBlock = @'
 - Deduplicate each VIN against the dashboard ledger, the named store sheet, and RAG checkpoints. Reuse a verified existing sheet row; never append it again. Never repost a vehicle with a terminal AutoSoft/readback checkpoint.
 - Acquire a foreground RDP lease with `python tools/focus_autosoft_rdp.py --expected-title "<payload store.rdp_window_title>"` once before AutoSoft. Continue only when it returns `ok: true`, capture the fresh screen, and visually prove the inner instance is `<payload store.autosoft_instance>`. Keep that verified HWND foreground across vehicles; re-run only after an actual focus/window change or unexplained screen. Never send background input to `mstsc.exe`, and never type after an `unverifiable` action until one fresh capture proves state.
 - Build one verified local posting manifest during preflight. Do not revisit the sheet, dispatch workbook, or browser between AutoSoft records unless a verification fails. Keep one foreground AutoSoft session and reuse the open Accounting/Inventory workflow while processing the ordered vehicles sequentially.
+- Decode every ordered VIN once before AutoSoft with `tools/batch_vpic_decode.py`; use its single verified JSON artifact throughout the batch. Never author a decoder during a live run.
 - For every text control, focus the visibly verified target, press Ctrl+A, and paste the exact current-vehicle manifest value, then visually/readback verify it. Create a fresh record and completely clear/verify/re-enter only the current VIN for every vehicle. Never paste a multi-vehicle block into AutoSoft. Store charge values may come from the verified store template; VIN, ACV, freight, mileage, title, color, source, and totals remain vehicle-specific.
+- In the legacy purchase entry, currency fields use implied cents (`500.00` is typed as `50000`). Enter the debit template and freight first, set Invoice Amount to the vehicle ACV, then enter the credit template. Leave the inventory debit row amount alone: AutoSoft dynamically balances it back to full ACV as credits are committed. Freight belongs on the credit row whose GL is 31105; never put 31105 on the reserved Cash Purchase row, and verify every nonzero amount has the intended GL before Post. Decode before touching Line. If expected `9T` and GL 24100 are already visible, do not re-edit Line. If Line must be set, treat its numeric and suffix controls separately and re-verify `9T`, Used, and GL 24100 before posting.
 - On the LA City home screen only, `CRITICAL ERROR ID 227, Position Error #7-0 in AAJ3` is a known one-dismiss startup alert. Click OK once, require the normal `LA City Cars` home, open Accounting, and continue only if its password/PIN prompt appears and accepts the configured saved credential. Treat recurrence inside posting, an unusable Accounting module, or rejected authentication as a batch-wide AutoSoft failure. Never generalize this recovery to another error.
 - If Accounting reports an `Incomplete Direct Posting Entry`, dismiss once and inspect the recovery list without choosing `Finish Posting`. Record operator/date/stock/VIN suffix. Do not finish, delete, or overwrite an unrelated or collision-rejected draft; it requires separately authorized AutoSoft correction access or support. Continue only after a clean re-login proves the incomplete entry is resolved; otherwise fail the batch with the exact blocker.
 - Send per-vehicle callbacks using each child `request_id`. After each verified readback, mark that manifest record VERIFIED_POSTED, commit/push its RAG checkpoint, send COMPLETED, and require an accepted/idempotent response before sending PROCESSING for or touching the next child. Never leave two children PROCESSING. This durable barrier prevents a resumed batch from reposting completed work.
+- Use `tools/batch_checkpoint.py record` for every terminal manifest/checkpoint update, commit and push those exact files with terminal prompting disabled, then use `tools/batch_checkpoint.py callback` and `tools/dashboard_callback.py --payload-file ...`. Never hand-author, hand-patch, or repair JSON during a live run.
+- If a rejected Post creates a stock/VIN shell with zero original inventory, zero internals, and no active journal data, do not retry the stock number, delete the shell, or declare success. Return a vehicle-scoped failure that explicitly requires authorized AutoSoft Edits & Corrections recovery; later siblings may continue only if the store session is otherwise clean.
 - Isolate vehicle-specific failures and continue. For a store-wide safety failure, stop immediately and send one current-child FAILED callback with `--failure-scope BATCH`; the dashboard deterministically fails and releases all claimed siblings. Do not repeatedly attempt blind recovery.
 - Record an absolute 20-minute preflight deadline when the run starts and check it before every browser action until the first live sheet mutation. If it arrives before mutation, fail closed. Once a sheet block write begins, finish all authorized blocks and one independent export/readback as a single transaction; never stop with a partial batch row. Evaluate the deadline again after that verified sheet transaction, before AutoSoft. Do not use full-screen captures as a polling loop. In Chrome, use the configured existing-profile browser attachment once when available, otherwise prefer semantic element indexes and direct Ctrl+L navigation over raw tab coordinates; after one browser-prepare refusal use native semantic input and do not repeat setup attempts. Use one fresh targeted SOM/AX capture after an unverifiable action. Capture on screen transitions and verification checkpoints, prefer compact terminal/readback evidence, stop after two identical tool failures, and fail closed at a safe transaction boundary when shared preflight reaches 20 minutes or a vehicle reaches 15 minutes without a verified checkpoint.
 '@
@@ -223,5 +238,7 @@ if (-not $health -or $health.status -ne 'ok') { throw 'Hermes webhook health che
     focus_helper_path = (Join-Path $toolsDir 'focus_autosoft_rdp.py')
     batch_source_helper_path = (Join-Path $toolsDir 'batch_source_preflight.py')
     batch_manifest_helper_path = (Join-Path $toolsDir 'batch_manifest_preflight.py')
+    batch_decode_helper_path = (Join-Path $toolsDir 'batch_vpic_decode.py')
+    batch_checkpoint_helper_path = (Join-Path $toolsDir 'batch_checkpoint.py')
     config_backup = "$config.bak.dashboard-webhook.$timestamp"
 } | ConvertTo-Json -Compress
