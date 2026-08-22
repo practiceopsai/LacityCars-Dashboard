@@ -4,7 +4,8 @@ param(
     [string]$CallbackOrigin = 'https://lacity-api-production.up.railway.app',
     [string]$PromptFile = "$PSScriptRoot\vehicle-ready-prompt.txt",
     [string]$CallbackHelper = "$PSScriptRoot\dashboard_callback.py",
-    [string]$RdpFocusHelper = "$PSScriptRoot\focus_autosoft_rdp.py"
+    [string]$RdpFocusHelper = "$PSScriptRoot\focus_autosoft_rdp.py",
+    [string]$BatchSourceHelper = "$PSScriptRoot\batch_source_preflight.py"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -12,7 +13,7 @@ $hermes = Join-Path $HermesHome 'hermes-agent\bin\hermes.exe'
 $config = Join-Path $HermesHome 'config.yaml'
 $envFile = Join-Path $HermesHome '.env'
 
-foreach ($required in $hermes, $config, $envFile, $RagRoot, $PromptFile, $CallbackHelper, $RdpFocusHelper) {
+foreach ($required in $hermes, $config, $envFile, $RagRoot, $PromptFile, $CallbackHelper, $RdpFocusHelper, $BatchSourceHelper) {
     if (-not (Test-Path -LiteralPath $required)) { throw "Required path missing: $required" }
 }
 
@@ -106,10 +107,10 @@ Set-ConfigValue 'platforms.webhook.extra.routes.vehicle-stocking.deliver' 'log'
 # AutoSoft runs can otherwise retain hundreds of full desktop captures.  Keep
 # only a small recent evidence tail and deterministically prune older, large
 # tool results before they are resent on every subsequent model turn.
-Set-ConfigValue 'compression.proactive_prune_tokens' '100000'
-Set-ConfigValue 'compression.proactive_prune_min_result_chars' '8000'
-Set-ConfigValue 'compression.proactive_prune_min_reclaim_tokens' '20000'
-Set-ConfigValue 'compression.protect_last_n' '6'
+Set-ConfigValue 'compression.proactive_prune_tokens' '60000'
+Set-ConfigValue 'compression.proactive_prune_min_result_chars' '6000'
+Set-ConfigValue 'compression.proactive_prune_min_reclaim_tokens' '15000'
+Set-ConfigValue 'compression.protect_last_n' '4'
 Set-ConfigValue 'LACITY_DASHBOARD_CALLBACK_SECRET' $callbackSecret
 Set-DotEnvValue 'LACITY_DASHBOARD_CALLBACK_ORIGIN' $CallbackOrigin
 
@@ -117,6 +118,7 @@ $toolsDir = Join-Path $RagRoot 'tools'
 New-Item -ItemType Directory -Path $toolsDir -Force | Out-Null
 Copy-Item -LiteralPath $CallbackHelper -Destination (Join-Path $toolsDir 'dashboard_callback.py') -Force
 Copy-Item -LiteralPath $RdpFocusHelper -Destination (Join-Path $toolsDir 'focus_autosoft_rdp.py') -Force
+Copy-Item -LiteralPath $BatchSourceHelper -Destination (Join-Path $toolsDir 'batch_source_preflight.py') -Force
 
 $contractBlock = @'
 ## Dashboard-triggered stocking runs
@@ -143,7 +145,7 @@ $batchBlock = @'
 
 - A `vehicle.batch_ready` event is one store-specific execution batch. Never combine stores or switch AutoSoft instances inside the run.
 - Before touching a live system, parse the complete ordered manifest. Its array length must equal `batch.vehicle_count`; every child needs a complete request ID and a 17-character VIN. A missing/truncated child is a batch-wide failure: make no live changes and report one child FAILED with `--failure-scope BATCH`.
-- Preflight every supplied vehicle first. Accept complete dashboard freight evidence without reopening dispatch. Use one current NextGear export for the whole window, opening detail only for missing/conflicting fields. Scan all VINs from one stock-sheet export. For each contiguous set of authorized columns in the store map, build one tab/newline-delimited clipboard block and paste all new rows at once; split around unauthorized, trade, or formula columns and never step through cells with Tab/Enter. Verify every written row from one independent export before opening AutoSoft.
+- Preflight every supplied vehicle first. Accept complete dashboard freight evidence without reopening dispatch. Export and scan only the payload store's stock sheet; never fetch the other store's sheet during a store-isolated run. Before opening NextGear, run `tools/batch_source_preflight.py` against the newest Exportable Inventory workbook and all payload VINs. Reuse it when the helper returns `ready: true` (at most six hours old, one exact `In Stock` row per VIN). Otherwise open NextGear directly at Tools > Exportable Inventory and make one fresh export; never substitute Approved Floorplans. Run the helper again and fail closed if it is still not ready. For each contiguous set of authorized sheet columns, build one tab/newline-delimited clipboard block and paste all new rows at once; split around unauthorized, trade, or formula columns and never step through cells with Tab/Enter. Verify every written row from one independent export before opening AutoSoft.
 - Deduplicate each VIN against the dashboard ledger, the named store sheet, and RAG checkpoints. Reuse a verified existing sheet row; never append it again. Never repost a vehicle with a terminal AutoSoft/readback checkpoint.
 - Acquire a foreground RDP lease with `python tools/focus_autosoft_rdp.py --expected-title "<payload store.rdp_window_title>"` once before AutoSoft. Continue only when it returns `ok: true`, capture the fresh screen, and visually prove the inner instance is `<payload store.autosoft_instance>`. Keep that verified HWND foreground across vehicles; re-run only after an actual focus/window change or unexplained screen. Never send background input to `mstsc.exe`, and never type after an `unverifiable` action until one fresh capture proves state.
 - Build one verified local posting manifest during preflight. Do not revisit the sheet, dispatch workbook, or browser between AutoSoft records unless a verification fails. Keep one foreground AutoSoft session and reuse the open Accounting/Inventory workflow while processing the ordered vehicles sequentially.
@@ -152,7 +154,7 @@ $batchBlock = @'
 - If Accounting reports an `Incomplete Direct Posting Entry`, dismiss once and inspect the recovery list without choosing `Finish Posting`. Record operator/date/stock/VIN suffix. Do not finish, delete, or overwrite an unrelated or collision-rejected draft; it requires separately authorized AutoSoft correction access or support. Continue only after a clean re-login proves the incomplete entry is resolved; otherwise fail the batch with the exact blocker.
 - Send per-vehicle callbacks using each child `request_id`. After each verified readback, mark that manifest record VERIFIED_POSTED, commit/push its RAG checkpoint, send COMPLETED, and require an accepted/idempotent response before sending PROCESSING for or touching the next child. Never leave two children PROCESSING. This durable barrier prevents a resumed batch from reposting completed work.
 - Isolate vehicle-specific failures and continue. For a store-wide safety failure, stop immediately and send one current-child FAILED callback with `--failure-scope BATCH`; the dashboard deterministically fails and releases all claimed siblings. Do not repeatedly attempt blind recovery.
-- Do not use full-screen captures as a polling loop. Capture on screen transitions and verification checkpoints, prefer compact terminal/readback evidence, stop after two identical tool failures, and fail closed when shared preflight exceeds 12 minutes or a vehicle exceeds 15 minutes without a verified checkpoint.
+- Record an absolute preflight deadline when the run starts and check it before every browser action. Do not use full-screen captures as a polling loop. In Chrome, prefer semantic element indexes and direct Ctrl+L navigation over raw tab coordinates; use one fresh targeted SOM/AX capture after an unverifiable action. Capture on screen transitions and verification checkpoints, prefer compact terminal/readback evidence, stop after two identical tool failures, and fail closed before another action when shared preflight reaches 12 minutes or a vehicle reaches 15 minutes without a verified checkpoint.
 '@
 
 Upsert-MarkedSection (Join-Path $RagRoot '.hermes.md') '## Dashboard-triggered stocking runs' $contractBlock
@@ -200,5 +202,6 @@ if (-not $health -or $health.status -ne 'ok') { throw 'Hermes webhook health che
     webhook_health = $health.status
     helper_path = (Join-Path $toolsDir 'dashboard_callback.py')
     focus_helper_path = (Join-Path $toolsDir 'focus_autosoft_rdp.py')
+    batch_source_helper_path = (Join-Path $toolsDir 'batch_source_preflight.py')
     config_backup = "$config.bak.dashboard-webhook.$timestamp"
 } | ConvertTo-Json -Compress
