@@ -143,6 +143,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--request", type=Path, required=True)
     parser.add_argument("--stock-sheet", type=Path, required=True)
     parser.add_argument("--stock-prefix", required=True)
+    parser.add_argument("--expected-request-id", required=True)
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args()
 
@@ -163,6 +164,7 @@ def main() -> int:
 
     vins = [normalize_vin(vehicle.get("vin")) for vehicle in vehicles]
     request_ids = [str(vehicle.get("request_id") or "") for vehicle in vehicles]
+    current_request_id = str(request.get("request_id") or "")
     expected_count = int((request.get("batch") or {}).get("vehicle_count") or len(vehicles))
     start = parse_start((request.get("schedule") or {}).get("starts_at"))
     now = datetime.now(timezone.utc)
@@ -179,6 +181,11 @@ def main() -> int:
         }
 
     checks = {
+        "current_request_id_matches": current_request_id == args.expected_request_id,
+        "child_request_ids_belong_to_current": all(
+            request_id.startswith(f"{args.expected_request_id}:")
+            for request_id in request_ids
+        ),
         "count_matches": len(vehicles) == expected_count and len(vehicles) > 0,
         "unique_request_ids": len(request_ids) == len(set(request_ids)) and all(request_ids),
         "complete_request_ids": all(":" in request_id for request_id in request_ids),
@@ -199,6 +206,8 @@ def main() -> int:
     ready = not errors and all(
         [
             checks["count_matches"],
+            checks["current_request_id_matches"],
+            checks["child_request_ids_belong_to_current"],
             checks["unique_request_ids"],
             checks["complete_request_ids"],
             checks["unique_vins"],

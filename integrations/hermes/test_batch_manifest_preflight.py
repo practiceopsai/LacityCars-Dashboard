@@ -23,6 +23,7 @@ def request_payload() -> dict:
     start = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
     vins = ["WP1AA2A59KLB00525", "W1N0G8DBXNV374754", "4JGFB4KBXLA013794"]
     return {
+        "request_id": "batch:3",
         "batch": {"vehicle_count": 3},
         "schedule": {"starts_at": start},
         "vehicles": [
@@ -59,6 +60,8 @@ def run(tmp_path: Path, payload: dict) -> tuple[subprocess.CompletedProcess[str]
             str(stock_sheet),
             "--stock-prefix",
             "S",
+            "--expected-request-id",
+            "batch:3",
             "--output",
             str(output),
         ],
@@ -88,3 +91,14 @@ def test_rejects_duplicate_vin_or_bad_freight(tmp_path: Path) -> None:
     assert result["ready"] is False
     assert result["checks"]["unique_vins"] is False
     assert result["checks"]["freight"]["4JGFB4KBXLA013794"]["valid"] is False
+
+
+def test_rejects_stale_request_identity(tmp_path: Path) -> None:
+    payload = request_payload()
+    payload["request_id"] = "batch:2"
+
+    completed, result = run(tmp_path, payload)
+
+    assert completed.returncode == 2
+    assert result["ready"] is False
+    assert result["checks"]["current_request_id_matches"] is False
