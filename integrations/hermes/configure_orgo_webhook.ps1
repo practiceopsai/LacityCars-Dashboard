@@ -5,6 +5,7 @@ param(
     [string]$PromptFile = "$PSScriptRoot\vehicle-ready-prompt.txt",
     [string]$CallbackHelper = "$PSScriptRoot\dashboard_callback.py",
     [string]$RdpFocusHelper = "$PSScriptRoot\focus_autosoft_rdp.py",
+    [string]$AutoSoftPinHelper = "$PSScriptRoot\autosoft_pin_login.py",
     [string]$BatchSourceHelper = "$PSScriptRoot\batch_source_preflight.py",
     [string]$BatchManifestHelper = "$PSScriptRoot\batch_manifest_preflight.py",
     [string]$BatchPostingManifestHelper = "$PSScriptRoot\batch_posting_manifest.py",
@@ -17,7 +18,7 @@ $hermes = Join-Path $HermesHome 'hermes-agent\bin\hermes.exe'
 $config = Join-Path $HermesHome 'config.yaml'
 $envFile = Join-Path $HermesHome '.env'
 
-foreach ($required in $hermes, $config, $envFile, $RagRoot, $PromptFile, $CallbackHelper, $RdpFocusHelper, $BatchSourceHelper, $BatchManifestHelper, $BatchPostingManifestHelper, $BatchDecodeHelper, $BatchCheckpointHelper) {
+foreach ($required in $hermes, $config, $envFile, $RagRoot, $PromptFile, $CallbackHelper, $RdpFocusHelper, $AutoSoftPinHelper, $BatchSourceHelper, $BatchManifestHelper, $BatchPostingManifestHelper, $BatchDecodeHelper, $BatchCheckpointHelper) {
     if (-not (Test-Path -LiteralPath $required)) { throw "Required path missing: $required" }
 }
 
@@ -126,6 +127,7 @@ $toolsDir = Join-Path $RagRoot 'tools'
 New-Item -ItemType Directory -Path $toolsDir -Force | Out-Null
 Copy-Item -LiteralPath $CallbackHelper -Destination (Join-Path $toolsDir 'dashboard_callback.py') -Force
 Copy-Item -LiteralPath $RdpFocusHelper -Destination (Join-Path $toolsDir 'focus_autosoft_rdp.py') -Force
+Copy-Item -LiteralPath $AutoSoftPinHelper -Destination (Join-Path $toolsDir 'autosoft_pin_login.py') -Force
 Copy-Item -LiteralPath $BatchSourceHelper -Destination (Join-Path $toolsDir 'batch_source_preflight.py') -Force
 Copy-Item -LiteralPath $BatchManifestHelper -Destination (Join-Path $toolsDir 'batch_manifest_preflight.py') -Force
 Copy-Item -LiteralPath $BatchPostingManifestHelper -Destination (Join-Path $toolsDir 'batch_posting_manifest.py') -Force
@@ -156,6 +158,7 @@ $contractBlock = @'
 - A valid `vehicle.ready` event on the HMAC-authenticated `vehicle-stocking` webhook is explicit authorization to stock and post exactly the supplied vehicle for exactly the supplied store. It has the same live authority as an explicit stock-and-post message from the paired operator; do not request duplicate confirmation.
 - Process only one dashboard vehicle in the webhook session. Treat `request_id` as the immutable run identity and never substitute a different VIN or store.
 - Before a contiguous live-input phase inside Remote Desktop, run `python tools/focus_autosoft_rdp.py --expected-title <payload store.rdp_window_title>`, require `ok: true`, then capture once and visually verify the inner AutoSoft screen shows `<payload store.autosoft_instance>`. Keep that HWND foreground across the batch; re-run the guard only after an actual window/focus change or unexplained state. Never send background input to `mstsc.exe`. An `unverifiable` action requires one fresh visual capture before more input, not repeated blind clicking.
+- At the visible Accounting PIN prompt, never search files, RAG, environment variables, chat, or logs for the secret. Run exactly once `python tools/autosoft_pin_login.py --expected-title <payload store.rdp_window_title> --request-id <current webhook request_id>`. The helper reads Windows Credential Manager and sends the secret only to the foreground authorized RDP window without exposing it. Require `ok: true`, then capture and verify that Accounting opened. If the helper fails, the prompt remains, or AutoSoft rejects authentication, report `AUTOSOFT_UNAVAILABLE` with batch scope; never retry, type a guessed PIN, or use another request ID.
 - Use `tools/dashboard_callback.py` to send `PROCESSING` when live work begins and exactly one terminal `COMPLETED` or `FAILED` result after the mandatory RAG finish step. The helper reads its signing secret from the environment; never reveal, print, copy, or place that secret in an artifact.
 - The callback's `stock_number`, ACV, freight, final total, source/run summary, and RAG commit must come from verified run evidence. Any safety gate that blocks posting must be returned as `FAILED` with the exact reason.
 '@
