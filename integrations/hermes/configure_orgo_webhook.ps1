@@ -103,6 +103,13 @@ Set-ConfigValue 'platforms.webhook.extra.routes.vehicle-stocking.skills' '["vehi
 # job, so grant only the tools needed by the documented workflow.
 Set-ConfigValue 'platforms.webhook.extra.routes.vehicle-stocking.toolsets' '["terminal","file","browser","computer_use","vision","skills","todo","memory"]'
 Set-ConfigValue 'platforms.webhook.extra.routes.vehicle-stocking.deliver' 'log'
+# AutoSoft runs can otherwise retain hundreds of full desktop captures.  Keep
+# only a small recent evidence tail and deterministically prune older, large
+# tool results before they are resent on every subsequent model turn.
+Set-ConfigValue 'compression.proactive_prune_tokens' '100000'
+Set-ConfigValue 'compression.proactive_prune_min_result_chars' '8000'
+Set-ConfigValue 'compression.proactive_prune_min_reclaim_tokens' '20000'
+Set-ConfigValue 'compression.protect_last_n' '6'
 Set-ConfigValue 'LACITY_DASHBOARD_CALLBACK_SECRET' $callbackSecret
 Set-DotEnvValue 'LACITY_DASHBOARD_CALLBACK_ORIGIN' $CallbackOrigin
 

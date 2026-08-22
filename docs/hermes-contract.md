@@ -90,6 +90,9 @@ the same signed body directly to `HERMES_ENDPOINT`.
 - A batch also holds the global desktop lock from trigger acceptance until all
   claimed child callbacks are terminal. Completed children are permanent
   checkpoints; a later continuation includes only newly READY, unclaimed VINs.
+  Hermes must durably write the current VIN's readback/RAG checkpoint and receive
+  an accepted or idempotent `COMPLETED` callback before it marks or touches the
+  next child `PROCESSING`; two children must never be live at once.
   A watchdog fails every non-terminal claimed child closed if the batch stops
   reporting, because partial live-system work cannot be assumed safe to retry.
 - Before live RDP input, Hermes uses `tools/focus_autosoft_rdp.py` and proves
@@ -106,6 +109,10 @@ the same signed body directly to `HERMES_ENDPOINT`.
   It explicitly enables only the terminal, file, browser, computer-use, vision,
   skills, task, and memory toolsets required by the stocking playbook. Generic
   webhook routes remain restricted.
+- Gateway setup enables deterministic proactive pruning of old, large tool
+  results and retains a six-message evidence tail. Together with transition-only
+  desktop captures, this prevents long AutoSoft batches from resending hundreds
+  of stale full-screen results on every field operation.
 - A watchdog marks a job `FAILED` if Hermes supplies no terminal callback within
   90 minutes (configurable). This fail-closed recovery prevents an abandoned
   `PROCESSING` row from blocking every later vehicle; an operator must verify
