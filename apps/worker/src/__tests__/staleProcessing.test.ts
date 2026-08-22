@@ -129,7 +129,7 @@ describe("resumeUnclaimedReadyBatches", () => {
     const prisma = {
       stockingBatch: {
         findMany: vi.fn().mockResolvedValue([
-          { id: "batch-1", vehicles: [safe] },
+          { id: "batch-1", vehicles: [safe, { ...safe, id: "veh-done", status: "COMPLETED" }] },
         ]),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUniqueOrThrow: vi.fn().mockResolvedValue({
@@ -170,6 +170,13 @@ describe("resumeUnclaimedReadyBatches", () => {
           {
             id: "batch-1",
             vehicles: [
+              {
+                id: "veh-done",
+                status: "COMPLETED",
+                hermesDispatchedAt: new Date(),
+                freightAmount: 500,
+                freightEvidence: { loadId: "42" },
+              },
               {
                 id: "veh-claimed",
                 status: "READY",

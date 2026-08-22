@@ -124,17 +124,21 @@ export async function resumeUnclaimedReadyBatches(deps: BatchContinuationDeps): 
   const candidates = await deps.prisma.stockingBatch.findMany({
     where: {
       status: { in: ["FAILED", "PARTIAL"] },
-      vehicles: {
-        some: {
-          status: "READY",
-          hermesDispatchedAt: null,
-          freightAmount: { not: null },
+      AND: [
+        {
+          vehicles: {
+            some: {
+              status: "READY",
+              hermesDispatchedAt: null,
+              freightAmount: { not: null },
+            },
+          },
         },
-      },
+        { vehicles: { some: { status: { in: ["COMPLETED", "FAILED"] } } } },
+      ],
     },
     include: {
       vehicles: {
-        where: { status: { in: ["READY", "PROCESSING"] } },
         select: {
           id: true,
           status: true,
@@ -148,6 +152,9 @@ export async function resumeUnclaimedReadyBatches(deps: BatchContinuationDeps): 
 
   let resumed = 0;
   for (const batch of candidates) {
+    const hasTerminalChild = batch.vehicles.some(
+      (vehicle) => vehicle.status === "COMPLETED" || vehicle.status === "FAILED",
+    );
     const uncertain = batch.vehicles.some(
       (vehicle) =>
         vehicle.status === "PROCESSING" ||
@@ -160,7 +167,7 @@ export async function resumeUnclaimedReadyBatches(deps: BatchContinuationDeps): 
         vehicle.freightAmount !== null &&
         vehicle.freightEvidence !== null,
     );
-    if (uncertain || safeReady.length === 0) continue;
+    if (!hasTerminalChild || uncertain || safeReady.length === 0) continue;
 
     const changed = await deps.prisma.stockingBatch.updateMany({
       where: { id: batch.id, status: { in: ["FAILED", "PARTIAL"] } },
