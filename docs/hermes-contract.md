@@ -42,6 +42,7 @@ the same signed body directly to `HERMES_ENDPOINT`.
     "code": "LA_CITY",
     "name": "LA City",
     "autosoft_instance": "LA City Cars",
+    "rdp_window_title": "laci81.autosoftflex.com",
     "stock_prefix": "L",
     "internal_charges": [
       { "label": "Pack", "amount": 1761 },
@@ -92,8 +93,10 @@ the same signed body directly to `HERMES_ENDPOINT`.
   A watchdog fails every non-terminal claimed child closed if the batch stops
   reporting, because partial live-system work cannot be assumed safe to retry.
 - Before live RDP input, Hermes uses `tools/focus_autosoft_rdp.py` and proves
-  that exactly one RDP window matches `store.autosoft_instance` and is
-  foreground. Background or unverifiable `mstsc.exe` input is forbidden.
+  that exactly one native RDP window matches `store.rdp_window_title` and is
+  foreground, then visually verifies the inner dealer label matches
+  `store.autosoft_instance`. Background or unverifiable `mstsc.exe` input is
+  forbidden.
 - `schedule.starts_at` is the authoritative UTC not-before boundary. The worker
   creates a delayed job and rechecks the boundary immediately before dispatch;
   Hermes independently checks it before touching any live system. Eastern and

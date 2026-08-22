@@ -27,6 +27,7 @@ const store = {
   code: "LAC",
   name: "LA City Cars",
   autosoftInstance: "lacity",
+  rdpWindowTitle: "laci81.autosoftflex.com",
   stockPrefix: "LC",
   internalCharges: [{ label: "Detail", amount: 150 }],
   chargesTotal: 150,

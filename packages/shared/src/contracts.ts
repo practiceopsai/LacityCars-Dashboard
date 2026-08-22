@@ -90,6 +90,7 @@ export const StoreUpsertSchema = z
       .trim()
       .regex(/^[A-Z0-9]{1,3}$/, "Stock prefix must be 1-3 uppercase characters"),
     autosoftInstance: z.string().trim().min(1).max(120),
+    rdpWindowTitle: z.string().trim().min(4).max(160),
     internalCharges: z.array(InternalChargeSchema).min(1).max(20),
     chargesTotal: z.number().int().nonnegative(),
     active: z.boolean().default(true),
@@ -138,6 +139,7 @@ export const HermesTriggerPayloadSchema = z.object({
     code: z.string(),
     name: z.string(),
     autosoft_instance: z.string(),
+    rdp_window_title: z.string().min(4),
     stock_prefix: z.string(),
     internal_charges: z.array(InternalChargeSchema),
     charges_total: z.number().int(),

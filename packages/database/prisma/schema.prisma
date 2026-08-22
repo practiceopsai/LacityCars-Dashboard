@@ -33,6 +33,8 @@ model Store {
   aliases          String[]
   stockPrefix      String
   autosoftInstance String
+  /// Stable substring of the native mstsc window title; distinct from the dealer name shown inside AutoSoft.
+  rdpWindowTitle   String    @default("")
   /// [{ label: string, amount: number }] — whole dollars. Never credentials/PINs.
   internalCharges  Json
   chargesTotal     Int

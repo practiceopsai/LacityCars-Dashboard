@@ -214,6 +214,7 @@ export function createHermesProcessor(deps: HermesDeps) {
         code: vehicle.store.code,
         name: vehicle.store.name,
         autosoft_instance: vehicle.store.autosoftInstance,
+        rdp_window_title: vehicle.store.rdpWindowTitle,
         stock_prefix: vehicle.store.stockPrefix,
         internal_charges: vehicle.store.internalCharges as unknown as InternalCharge[],
         charges_total: vehicle.store.chargesTotal,

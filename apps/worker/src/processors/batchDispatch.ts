@@ -212,6 +212,7 @@ export function createBatchDispatchProcessor(deps: BatchDispatchDeps) {
         code: batch.store.code,
         name: batch.store.name,
         autosoft_instance: batch.store.autosoftInstance,
+        rdp_window_title: batch.store.rdpWindowTitle,
         stock_prefix: batch.store.stockPrefix,
         internal_charges: batch.store.internalCharges as unknown as InternalCharge[],
         charges_total: batch.store.chargesTotal,

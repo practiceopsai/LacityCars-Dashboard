@@ -66,6 +66,7 @@ export async function resolveStore(prisma: PrismaClient, input: string): Promise
           aliases: s.aliases,
           stockPrefix: s.stockPrefix,
           autosoftInstance: s.autosoftInstance,
+          rdpWindowTitle: s.rdpWindowTitle,
           internalCharges: [],
           chargesTotal: s.chargesTotal,
         },

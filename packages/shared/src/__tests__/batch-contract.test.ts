@@ -58,6 +58,7 @@ describe("batch contracts", () => {
         code: "LA_CITY",
         name: "LA City",
         autosoft_instance: "LA City Cars",
+        rdp_window_title: "laci81.autosoftflex.com",
         stock_prefix: "L",
         internal_charges: [{ label: "Pack", amount: 55 }],
         charges_total: 55,

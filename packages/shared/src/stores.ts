@@ -10,6 +10,7 @@ export interface StoreConfig {
   aliases: string[];
   stockPrefix: string;
   autosoftInstance: string;
+  rdpWindowTitle: string;
   internalCharges: InternalCharge[];
   chargesTotal: number;
 }
@@ -63,6 +64,7 @@ export const SEED_STORES: StoreConfig[] = [
     aliases: ["LA", "LA City Cars"],
     stockPrefix: "L",
     autosoftInstance: "LA City Cars",
+    rdpWindowTitle: "laci81.autosoftflex.com",
     internalCharges: [
       { label: "Pack", amount: 1761 },
       { label: "LoJack", amount: 134 },
@@ -77,6 +79,7 @@ export const SEED_STORES: StoreConfig[] = [
     aliases: ["Columbia", "Columbia City Cars"],
     stockPrefix: "S",
     autosoftInstance: "Columbia City Cars LLC",
+    rdpWindowTitle: "colu64.autosoftflex.com",
     internalCharges: [
       { label: "Pack", amount: 1761 },
       { label: "LoJack", amount: 134 },

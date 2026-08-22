@@ -37,9 +37,11 @@ describe("SEED_STORES", () => {
     expect(la.aliases).toEqual(["LA", "LA City Cars"]);
     expect(la.stockPrefix).toBe("L");
     expect(la.autosoftInstance).toBe("LA City Cars");
+    expect(la.rdpWindowTitle).toBe("laci81.autosoftflex.com");
     expect(columbia.aliases).toEqual(["Columbia", "Columbia City Cars"]);
     expect(columbia.stockPrefix).toBe("S");
     expect(columbia.autosoftInstance).toBe("Columbia City Cars LLC");
+    expect(columbia.rdpWindowTitle).toBe("colu64.autosoftflex.com");
 
     for (const store of [la, columbia]) {
       expect(validateStoreCharges(store.internalCharges, store.chargesTotal).ok).toBe(true);
@@ -64,6 +66,7 @@ describe("StoreUpsertSchema", () => {
     aliases: ["Test"],
     stockPrefix: "T",
     autosoftInstance: "Test Store LLC",
+    rdpWindowTitle: "test.autosoftflex.com",
     internalCharges: [{ label: "Pack", amount: 100 }],
     chargesTotal: 100,
     active: true,

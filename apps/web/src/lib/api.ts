@@ -5,6 +5,7 @@ export interface StoreDto {
   aliases: string[];
   stockPrefix: string;
   autosoftInstance: string;
+  rdpWindowTitle: string;
   internalCharges: { label: string; amount: number }[];
   chargesTotal: number;
   active: boolean;

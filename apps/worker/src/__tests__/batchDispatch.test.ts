@@ -48,6 +48,7 @@ function batch(overrides: Record<string, unknown> = {}) {
       code: "LA_CITY",
       name: "LA City",
       autosoftInstance: "LA City Cars",
+      rdpWindowTitle: "laci81.autosoftflex.com",
       stockPrefix: "L",
       internalCharges: [{ label: "Pack", amount: 55 }],
       chargesTotal: 55,
@@ -154,6 +155,10 @@ describe("batch dispatch", () => {
       expect.objectContaining({
         request_id: "batch-1:2",
         batch: expect.objectContaining({ vehicle_count: 2 }),
+        store: expect.objectContaining({
+          autosoft_instance: "LA City Cars",
+          rdp_window_title: "laci81.autosoftflex.com",
+        }),
         vehicles: [
           expect.objectContaining({ vin: "1HGCM82633A004352" }),
           expect.objectContaining({ vin: "1M8GDM9AXKP042788" }),

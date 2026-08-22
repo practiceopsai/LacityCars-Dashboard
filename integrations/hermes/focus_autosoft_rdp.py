@@ -15,6 +15,25 @@ import sys
 from ctypes import wintypes
 
 
+# Compatibility for jobs rendered before rdp_window_title was added to the
+# dashboard contract. New jobs pass the native title directly; these aliases
+# let an already-running, correctly identified store job reach the same safe
+# native-window check without weakening matching for unknown stores.
+KNOWN_RDP_TITLE_ALIASES = {
+    "la city cars": {"laci81.autosoftflex.com", "autosoft la city"},
+    "columbia city cars llc": {"colu64.autosoftflex.com", "autosoft columbia city"},
+}
+
+
+def title_aliases(value: str) -> set[str]:
+    expected = value.strip().casefold()
+    aliases = {expected}
+    if expected.endswith(" cars"):
+        aliases.add(expected[: -len(" cars")].strip())
+    aliases.update(KNOWN_RDP_TITLE_ALIASES.get(expected, set()))
+    return {alias for alias in aliases if len(alias) >= 4}
+
+
 def fail(reason: str, matches: list[dict[str, object]] | None = None) -> int:
     print(json.dumps({"ok": False, "reason": reason, "matches": matches or []}))
     return 1
@@ -27,11 +46,7 @@ def main() -> int:
     if os.name != "nt":
         return fail("WINDOWS_REQUIRED")
 
-    expected = args.expected_title.strip().casefold()
-    aliases = {expected}
-    if expected.endswith(" cars"):
-        aliases.add(expected[: -len(" cars")].strip())
-    aliases = {alias for alias in aliases if len(alias) >= 4}
+    aliases = title_aliases(args.expected_title)
     if not aliases:
         return fail("EXPECTED_TITLE_TOO_SHORT")
 

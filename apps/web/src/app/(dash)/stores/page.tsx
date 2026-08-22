@@ -15,6 +15,7 @@ interface StoreDraft {
   aliases: string;
   stockPrefix: string;
   autosoftInstance: string;
+  rdpWindowTitle: string;
   charges: ChargeRow[];
   chargesTotal: string;
   active: boolean;
@@ -28,6 +29,7 @@ function toDraft(store: StoreDto): StoreDraft {
     aliases: store.aliases.join(", "),
     stockPrefix: store.stockPrefix,
     autosoftInstance: store.autosoftInstance,
+    rdpWindowTitle: store.rdpWindowTitle,
     charges: store.internalCharges.map((c) => ({ label: c.label, amount: String(c.amount) })),
     chargesTotal: String(store.chargesTotal),
     active: store.active,
@@ -40,6 +42,7 @@ const EMPTY_DRAFT: StoreDraft = {
   aliases: "",
   stockPrefix: "",
   autosoftInstance: "",
+  rdpWindowTitle: "",
   charges: [{ label: "Pack", amount: "0" }],
   chargesTotal: "0",
   active: true,
@@ -78,6 +81,7 @@ function StoreForm({ draft: initial, onSaved }: { draft: StoreDraft; onSaved: ()
         .filter(Boolean),
       stockPrefix: draft.stockPrefix.trim().toUpperCase(),
       autosoftInstance: draft.autosoftInstance.trim(),
+      rdpWindowTitle: draft.rdpWindowTitle.trim(),
       internalCharges: draft.charges.map((c) => ({
         label: c.label.trim(),
         amount: Number(c.amount) || 0,
@@ -148,6 +152,16 @@ function StoreForm({ draft: initial, onSaved }: { draft: StoreDraft; onSaved: ()
           />
         </label>
       </div>
+      <label className="field">
+        <span>RDP window title</span>
+        <input
+          type="text"
+          value={draft.rdpWindowTitle}
+          onChange={(e) => setDraft({ ...draft, rdpWindowTitle: e.target.value })}
+          placeholder="Stable native RDP title, e.g. colu64.autosoftflex.com"
+        />
+        <p className="field-hint">Used only to acquire the correct shared desktop; the AutoSoft instance above is verified inside the session.</p>
+      </label>
 
       <h2 style={{ marginTop: 8 }}>Internal charges</h2>
       {draft.charges.map((charge, i) => (
