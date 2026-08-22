@@ -4,7 +4,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 
 SCRIPT = Path(__file__).with_name("batch_manifest_preflight.py")
@@ -44,12 +44,16 @@ def request_payload() -> dict:
     }
 
 
-def run(tmp_path: Path, payload: dict) -> tuple[subprocess.CompletedProcess[str], dict]:
+def run(
+    tmp_path: Path,
+    payload: dict,
+    sheet_setup=save_sheet,
+) -> tuple[subprocess.CompletedProcess[str], dict]:
     request = tmp_path / "request.json"
     stock_sheet = tmp_path / "stock.xlsx"
     output = tmp_path / "result.json"
     request.write_text(json.dumps(payload), encoding="utf-8")
-    save_sheet(stock_sheet)
+    sheet_setup(stock_sheet)
     completed = subprocess.run(
         [
             sys.executable,
@@ -102,3 +106,59 @@ def test_rejects_stale_request_identity(tmp_path: Path) -> None:
     assert completed.returncode == 2
     assert result["ready"] is False
     assert result["checks"]["current_request_id_matches"] is False
+
+
+def save_partial_tail_rows(path: Path) -> None:
+    save_sheet(path)
+    workbook = load_workbook(path)
+    sheet = workbook["Sheet1"]
+    rows = [
+        [None, "S2427", None, "WP1AA2A59KLB00525", 2019, "PORSCHE", "MACAN", "SILVER", 66180],
+        [None, "S2428", None, "W1N0G8DBXNV374754", 2022, "MERCEDES-BENZ", "GLC 300", "GRAY", 77950],
+        [None, "S2429", None, "4JGFB4KBXLA013794", 2020, "MERCEDES-BENZ", "GLE 350 4MATIC", "SILVER", 73218],
+    ]
+    for values in rows:
+        sheet.append(values)
+    workbook.save(path)
+
+
+def test_resumes_exact_consecutive_payload_rows_at_sheet_tail(tmp_path: Path) -> None:
+    completed, result = run(tmp_path, request_payload(), save_partial_tail_rows)
+
+    assert completed.returncode == 0
+    assert result["ready"] is True
+    assert result["sheet"]["plan_mode"] == "RESUME_EXISTING_TAIL_ROWS"
+    assert [item["stock"] for item in result["sheet"]["candidates"]] == ["S2427", "S2428", "S2429"]
+    assert [item["row"] for item in result["sheet"]["candidates"]] == [3, 4, 5]
+
+
+def save_mixed_rows(path: Path) -> None:
+    save_sheet(path)
+    workbook = load_workbook(path)
+    sheet = workbook["Sheet1"]
+    sheet.append([None, "S2427", None, "WP1AA2A59KLB00525"])
+    workbook.save(path)
+
+
+def test_rejects_mixed_existing_and_missing_payload_rows(tmp_path: Path) -> None:
+    completed, result = run(tmp_path, request_payload(), save_mixed_rows)
+
+    assert completed.returncode == 2
+    assert result["ready"] is False
+    assert result["sheet"]["plan_mode"] == "MIXED_EXISTING_ROWS"
+
+
+def save_non_tail_rows(path: Path) -> None:
+    save_partial_tail_rows(path)
+    workbook = load_workbook(path)
+    sheet = workbook["Sheet1"]
+    sheet.append([None, "S2430", None, "JTDBR32E720045761"])
+    workbook.save(path)
+
+
+def test_rejects_payload_rows_that_are_not_the_sheet_tail(tmp_path: Path) -> None:
+    completed, result = run(tmp_path, request_payload(), save_non_tail_rows)
+
+    assert completed.returncode == 2
+    assert result["ready"] is False
+    assert result["sheet"]["plan_mode"] == "UNSAFE_EXISTING_ROWS"

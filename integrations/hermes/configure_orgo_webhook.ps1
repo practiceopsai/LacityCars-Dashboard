@@ -112,6 +112,10 @@ Set-ConfigValue 'compression.proactive_prune_tokens' '60000'
 Set-ConfigValue 'compression.proactive_prune_min_result_chars' '6000'
 Set-ConfigValue 'compression.proactive_prune_min_reclaim_tokens' '15000'
 Set-ConfigValue 'compression.protect_last_n' '4'
+# The stocking route is explicitly authorized to reuse the operator's saved
+# Chrome sessions. This eliminates repeated native fallback and allows the
+# typed browser layer to attach to the exact existing pid/window pair.
+Set-ConfigValue 'computer_use.grant_existing_profile' 'true'
 Set-ConfigValue 'LACITY_DASHBOARD_CALLBACK_SECRET' $callbackSecret
 Set-DotEnvValue 'LACITY_DASHBOARD_CALLBACK_ORIGIN' $CallbackOrigin
 
@@ -169,7 +173,7 @@ $batchBlock = @'
 - If Accounting reports an `Incomplete Direct Posting Entry`, dismiss once and inspect the recovery list without choosing `Finish Posting`. Record operator/date/stock/VIN suffix. Do not finish, delete, or overwrite an unrelated or collision-rejected draft; it requires separately authorized AutoSoft correction access or support. Continue only after a clean re-login proves the incomplete entry is resolved; otherwise fail the batch with the exact blocker.
 - Send per-vehicle callbacks using each child `request_id`. After each verified readback, mark that manifest record VERIFIED_POSTED, commit/push its RAG checkpoint, send COMPLETED, and require an accepted/idempotent response before sending PROCESSING for or touching the next child. Never leave two children PROCESSING. This durable barrier prevents a resumed batch from reposting completed work.
 - Isolate vehicle-specific failures and continue. For a store-wide safety failure, stop immediately and send one current-child FAILED callback with `--failure-scope BATCH`; the dashboard deterministically fails and releases all claimed siblings. Do not repeatedly attempt blind recovery.
-- Record an absolute preflight deadline when the run starts and check it before every browser action. Do not use full-screen captures as a polling loop. In Chrome, prefer semantic element indexes and direct Ctrl+L navigation over raw tab coordinates; use one fresh targeted SOM/AX capture after an unverifiable action. Capture on screen transitions and verification checkpoints, prefer compact terminal/readback evidence, stop after two identical tool failures, and fail closed before another action when shared preflight reaches 12 minutes or a vehicle reaches 15 minutes without a verified checkpoint.
+- Record an absolute 20-minute preflight deadline when the run starts and check it before every browser action until the first live sheet mutation. If it arrives before mutation, fail closed. Once a sheet block write begins, finish all authorized blocks and one independent export/readback as a single transaction; never stop with a partial batch row. Evaluate the deadline again after that verified sheet transaction, before AutoSoft. Do not use full-screen captures as a polling loop. In Chrome, use the configured existing-profile browser attachment once when available, otherwise prefer semantic element indexes and direct Ctrl+L navigation over raw tab coordinates; after one browser-prepare refusal use native semantic input and do not repeat setup attempts. Use one fresh targeted SOM/AX capture after an unverifiable action. Capture on screen transitions and verification checkpoints, prefer compact terminal/readback evidence, stop after two identical tool failures, and fail closed at a safe transaction boundary when shared preflight reaches 20 minutes or a vehicle reaches 15 minutes without a verified checkpoint.
 '@
 
 Upsert-MarkedSection (Join-Path $RagRoot '.hermes.md') '## Dashboard-triggered stocking runs' $contractBlock

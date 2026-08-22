@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Validate a dashboard batch and reserve collision-free sheet candidates.
+"""Validate a dashboard batch and reserve or resume collision-free sheet rows.
 
 This helper is deliberately read-only. It replaces ad-hoc validation code in
 live Hermes runs with one deterministic gate for schedule, VINs, freight,
-duplicate sheet rows, and the next sequential store stock numbers.
+duplicate sheet rows, the next sequential store stock numbers, and an exact
+tail-row recovery after an interrupted batch sheet write.
 """
 
 from __future__ import annotations
@@ -93,18 +94,34 @@ def scan_stock_sheet(path: Path, prefix: str, vins: list[str]) -> dict[str, Any]
     stock_pattern = re.compile(rf"^{re.escape(prefix.upper())}(\d+)$")
     stock_rows: list[tuple[int, int, str, str]] = []
     vin_counts = {vin: 0 for vin in vins}
+    payload_rows: dict[str, list[dict[str, Any]]] = {vin: [] for vin in vins}
     for row_number, values in enumerate(rows, start=1):
         normalized_values = [normalize_vin(value) for value in values]
         row_vins = set(vins).intersection(normalized_values)
         for vin in row_vins:
             vin_counts[vin] += 1
-        row_vin = next(iter(row_vins), "")
+        row_vin = next(iter(row_vins), "") if len(row_vins) == 1 else ""
+        row_stock = ""
+        row_stock_number: int | None = None
         for value in values:
             stock = str(value or "").strip().upper()
             match = stock_pattern.fullmatch(stock)
             if match:
-                stock_rows.append((int(match.group(1)), row_number, stock, row_vin))
+                row_stock = stock
+                row_stock_number = int(match.group(1))
+                stock_rows.append((row_stock_number, row_number, stock, row_vin))
                 break
+        if row_vin:
+            values_before = list(values[:11]) + [None] * max(0, 11 - len(values))
+            payload_rows[row_vin].append(
+                {
+                    "vin": row_vin,
+                    "stock": row_stock,
+                    "stock_number": row_stock_number,
+                    "row": row_number,
+                    "row_values_before": values_before[:11],
+                }
+            )
 
     if not stock_rows:
         raise ValueError(f"No {prefix.upper()} stock numbers were found in {path}")
@@ -113,27 +130,72 @@ def scan_stock_sheet(path: Path, prefix: str, vins: list[str]) -> dict[str, Any]
     max_number, max_row, max_stock, max_vin = stock_rows[-1]
     width = max(4, len(str(max_number)))
     existing_numbers = {number for number, _, _, _ in stock_rows}
-    candidates = []
-    for offset, vin in enumerate(vins, start=1):
-        number = max_number + offset
-        row_number = max_row + offset
-        values_before = list(rows[row_number - 1][:11]) if row_number <= len(rows) else [None] * 11
-        values_before += [None] * (11 - len(values_before))
-        candidates.append(
-            {
-                "vin": vin,
-                "stock": f"{prefix.upper()}{number:0{width}d}",
-                "row": row_number,
-                "row_values_before": values_before,
-                "stock_collision_count": int(number in existing_numbers),
-            }
+    present_count = sum(count > 0 for count in vin_counts.values())
+    plan_mode = "UNSAFE_EXISTING_ROWS"
+    resume_safe = False
+    candidates: list[dict[str, Any]] = []
+
+    if present_count == 0:
+        plan_mode = "APPEND_NEW"
+        for offset, vin in enumerate(vins, start=1):
+            number = max_number + offset
+            row_number = max_row + offset
+            values_before = list(rows[row_number - 1][:11]) if row_number <= len(rows) else [None] * 11
+            values_before += [None] * (11 - len(values_before))
+            candidates.append(
+                {
+                    "vin": vin,
+                    "stock": f"{prefix.upper()}{number:0{width}d}",
+                    "row": row_number,
+                    "row_values_before": values_before,
+                    "stock_collision_count": int(number in existing_numbers),
+                }
+            )
+    elif (
+        present_count == len(vins)
+        and all(count == 1 for count in vin_counts.values())
+        and all(len(payload_rows[vin]) == 1 for vin in vins)
+    ):
+        ordered = [payload_rows[vin][0] for vin in vins]
+        row_numbers = [item["row"] for item in ordered]
+        stock_numbers = [item["stock_number"] for item in ordered]
+        expected_rows = list(range(row_numbers[0], row_numbers[0] + len(vins)))
+        numeric_stocks = all(number is not None for number in stock_numbers)
+        expected_stocks = (
+            list(range(stock_numbers[0], stock_numbers[0] + len(vins)))
+            if numeric_stocks
+            else []
         )
+        resume_safe = bool(
+            row_numbers == expected_rows
+            and numeric_stocks
+            and stock_numbers == expected_stocks
+            and row_numbers[-1] == max_row
+            and stock_numbers[-1] == max_number
+        )
+        if resume_safe:
+            plan_mode = "RESUME_EXISTING_TAIL_ROWS"
+            candidates = [
+                {
+                    "vin": item["vin"],
+                    "stock": item["stock"],
+                    "row": item["row"],
+                    "row_values_before": item["row_values_before"],
+                    "stock_collision_count": 0,
+                }
+                for item in ordered
+            ]
+    elif 0 < present_count < len(vins):
+        plan_mode = "MIXED_EXISTING_ROWS"
 
     return {
         "path": str(path.resolve()),
         "worksheet": worksheet.title,
+        "plan_mode": plan_mode,
+        "resume_safe": resume_safe,
         "last_sequential_stock": {"stock": max_stock, "row": max_row, "vin": max_vin},
         "payload_vin_counts": vin_counts,
+        "payload_rows": payload_rows,
         "candidates": candidates,
     }
 
@@ -203,6 +265,21 @@ def main() -> int:
         except Exception as exc:  # provide a compact fail-closed artifact
             errors.append(str(exc))
 
+    sheet_plan_ready = bool(
+        sheet.get("plan_mode") == "APPEND_NEW"
+        and all(count == 0 for count in sheet.get("payload_vin_counts", {}).values())
+        and all(
+            candidate["stock_collision_count"] == 0
+            and all(value is None for value in candidate["row_values_before"])
+            for candidate in sheet.get("candidates", [])
+        )
+    ) or bool(
+        sheet.get("plan_mode") == "RESUME_EXISTING_TAIL_ROWS"
+        and sheet.get("resume_safe")
+        and all(count == 1 for count in sheet.get("payload_vin_counts", {}).values())
+        and len(sheet.get("candidates", [])) == len(vins)
+    )
+
     ready = not errors and all(
         [
             checks["count_matches"],
@@ -214,12 +291,7 @@ def main() -> int:
             checks["authorized"],
             all(item["format_valid"] and item["check_digit_valid"] for item in vin_checks.values()),
             all(item["valid"] for item in checks["freight"].values()),
-            all(count == 0 for count in sheet.get("payload_vin_counts", {}).values()),
-            all(
-                candidate["stock_collision_count"] == 0
-                and all(value is None for value in candidate["row_values_before"])
-                for candidate in sheet.get("candidates", [])
-            ),
+            sheet_plan_ready,
         ]
     )
     result = {
