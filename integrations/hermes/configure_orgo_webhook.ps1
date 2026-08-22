@@ -5,7 +5,8 @@ param(
     [string]$PromptFile = "$PSScriptRoot\vehicle-ready-prompt.txt",
     [string]$CallbackHelper = "$PSScriptRoot\dashboard_callback.py",
     [string]$RdpFocusHelper = "$PSScriptRoot\focus_autosoft_rdp.py",
-    [string]$BatchSourceHelper = "$PSScriptRoot\batch_source_preflight.py"
+    [string]$BatchSourceHelper = "$PSScriptRoot\batch_source_preflight.py",
+    [string]$BatchManifestHelper = "$PSScriptRoot\batch_manifest_preflight.py"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,7 +14,7 @@ $hermes = Join-Path $HermesHome 'hermes-agent\bin\hermes.exe'
 $config = Join-Path $HermesHome 'config.yaml'
 $envFile = Join-Path $HermesHome '.env'
 
-foreach ($required in $hermes, $config, $envFile, $RagRoot, $PromptFile, $CallbackHelper, $RdpFocusHelper, $BatchSourceHelper) {
+foreach ($required in $hermes, $config, $envFile, $RagRoot, $PromptFile, $CallbackHelper, $RdpFocusHelper, $BatchSourceHelper, $BatchManifestHelper) {
     if (-not (Test-Path -LiteralPath $required)) { throw "Required path missing: $required" }
 }
 
@@ -119,6 +120,18 @@ New-Item -ItemType Directory -Path $toolsDir -Force | Out-Null
 Copy-Item -LiteralPath $CallbackHelper -Destination (Join-Path $toolsDir 'dashboard_callback.py') -Force
 Copy-Item -LiteralPath $RdpFocusHelper -Destination (Join-Path $toolsDir 'focus_autosoft_rdp.py') -Force
 Copy-Item -LiteralPath $BatchSourceHelper -Destination (Join-Path $toolsDir 'batch_source_preflight.py') -Force
+Copy-Item -LiteralPath $BatchManifestHelper -Destination (Join-Path $toolsDir 'batch_manifest_preflight.py') -Force
+
+# Workbook helpers must be ready before a timed live run. Never spend batch
+# turns discovering or installing this dependency.
+$hermesPython = Join-Path $HermesHome 'hermes-agent\venv\Scripts\python.exe'
+& $hermesPython -c 'import openpyxl' 2>$null
+if ($LASTEXITCODE -ne 0) {
+    $uv = (Get-Command uv -ErrorAction SilentlyContinue).Source
+    if (-not $uv) { throw 'openpyxl is missing and uv is unavailable' }
+    & $uv pip install --python $hermesPython openpyxl | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to install openpyxl in the Hermes environment' }
+}
 
 $contractBlock = @'
 ## Dashboard-triggered stocking runs
@@ -145,7 +158,9 @@ $batchBlock = @'
 
 - A `vehicle.batch_ready` event is one store-specific execution batch. Never combine stores or switch AutoSoft instances inside the run.
 - Before touching a live system, parse the complete ordered manifest. Its array length must equal `batch.vehicle_count`; every child needs a complete request ID and a 17-character VIN. A missing/truncated child is a batch-wide failure: make no live changes and report one child FAILED with `--failure-scope BATCH`.
-- Preflight every supplied vehicle first. Accept complete dashboard freight evidence without reopening dispatch. Export and scan only the payload store's stock sheet; never fetch the other store's sheet during a store-isolated run. Before opening NextGear, run `tools/batch_source_preflight.py` against the newest Exportable Inventory workbook and all payload VINs. Reuse it when the helper returns `ready: true` (at most six hours old, one exact `In Stock` row per VIN). Otherwise open NextGear directly at Tools > Exportable Inventory and make one fresh export; never substitute Approved Floorplans. Run the helper again and fail closed if it is still not ready. For each contiguous set of authorized sheet columns, build one tab/newline-delimited clipboard block and paste all new rows at once; split around unauthorized, trade, or formula columns and never step through cells with Tab/Enter. Verify every written row from one independent export before opening AutoSoft.
+- Preflight every supplied vehicle first. Accept complete dashboard freight evidence without reopening dispatch. Export and scan only the payload store's stock sheet; never fetch the other store's sheet during a store-isolated run. Before opening NextGear, run `tools/batch_source_preflight.py` against the newest Exportable Inventory workbook and all payload VINs. Reuse it when the helper returns `ready: true` (at most six hours old, one exact `In Stock` row per VIN). Otherwise open NextGear directly at Tools > Exportable Inventory and make one fresh export; never substitute Approved Floorplans for ACV/source evidence. Run the helper again and fail closed if it is still not ready. Then run `tools/batch_manifest_preflight.py --request <saved-payload.json> --stock-sheet <target-store-export> --stock-prefix <payload store.stock_prefix> --output <manifest-validation.json>` and require `ready: true`; never create or debug a validator during a live run.
+- When the reusable export lacks color, use the authenticated NextGear Floor Plans list only as a color supplement. If Cox shows the saved-login flow, verify the expected saved username is already populated, click Next once, require a masked/autofilled password, and click Sign in once. Never type, copy, reveal, or persist the password; fail closed if it is not autofilled or authentication is rejected. Open Floor Plans once and search each full VIN sequentially in the same semantic search field. Require exactly one result and record the color shown in its Description; clear/replace the search value for the next VIN. Do not open detail pages and do not rerun exports when the one-result list supplies color.
+- After both helpers are ready, do not enumerate downloads, reread old run artifacts, load unrelated skills, or make broad RAG searches. Permit at most one targeted RAG query for a genuinely missing store rule. Build the compact posting manifest immediately. For each contiguous set of authorized sheet columns, build one tab/newline-delimited clipboard block and paste all new rows at once; split around unauthorized, trade, or formula columns and never step through cells with Tab/Enter. Verify every written row from one independent export before opening AutoSoft.
 - Deduplicate each VIN against the dashboard ledger, the named store sheet, and RAG checkpoints. Reuse a verified existing sheet row; never append it again. Never repost a vehicle with a terminal AutoSoft/readback checkpoint.
 - Acquire a foreground RDP lease with `python tools/focus_autosoft_rdp.py --expected-title "<payload store.rdp_window_title>"` once before AutoSoft. Continue only when it returns `ok: true`, capture the fresh screen, and visually prove the inner instance is `<payload store.autosoft_instance>`. Keep that verified HWND foreground across vehicles; re-run only after an actual focus/window change or unexplained screen. Never send background input to `mstsc.exe`, and never type after an `unverifiable` action until one fresh capture proves state.
 - Build one verified local posting manifest during preflight. Do not revisit the sheet, dispatch workbook, or browser between AutoSoft records unless a verification fails. Keep one foreground AutoSoft session and reuse the open Accounting/Inventory workflow while processing the ordered vehicles sequentially.
@@ -203,5 +218,6 @@ if (-not $health -or $health.status -ne 'ok') { throw 'Hermes webhook health che
     helper_path = (Join-Path $toolsDir 'dashboard_callback.py')
     focus_helper_path = (Join-Path $toolsDir 'focus_autosoft_rdp.py')
     batch_source_helper_path = (Join-Path $toolsDir 'batch_source_preflight.py')
+    batch_manifest_helper_path = (Join-Path $toolsDir 'batch_manifest_preflight.py')
     config_backup = "$config.bak.dashboard-webhook.$timestamp"
 } | ConvertTo-Json -Compress
