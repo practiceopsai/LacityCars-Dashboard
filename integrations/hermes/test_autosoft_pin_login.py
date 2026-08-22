@@ -1,4 +1,5 @@
 import argparse
+import ctypes
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +9,10 @@ import autosoft_pin_login as target
 
 
 class AutoSoftPinLoginTests(unittest.TestCase):
+    def test_input_structure_matches_native_windows_abi(self):
+        expected_size = 40 if ctypes.sizeof(ctypes.c_void_p) == 8 else 28
+        self.assertEqual(ctypes.sizeof(target.INPUT), expected_size)
+
     def test_executes_one_secret_submission_without_returning_pin(self):
         with tempfile.TemporaryDirectory() as temporary:
             args = argparse.Namespace(

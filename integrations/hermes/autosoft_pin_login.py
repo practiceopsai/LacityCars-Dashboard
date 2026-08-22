@@ -56,8 +56,32 @@ class KEYBDINPUT(ctypes.Structure):
     ]
 
 
+class MOUSEINPUT(ctypes.Structure):
+    _fields_ = [
+        ("dx", wintypes.LONG),
+        ("dy", wintypes.LONG),
+        ("mouseData", wintypes.DWORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ctypes.c_void_p),
+    ]
+
+
+class HARDWAREINPUT(ctypes.Structure):
+    _fields_ = [
+        ("uMsg", wintypes.DWORD),
+        ("wParamL", wintypes.WORD),
+        ("wParamH", wintypes.WORD),
+    ]
+
+
 class INPUTUNION(ctypes.Union):
-    _fields_ = [("ki", KEYBDINPUT)]
+    # INPUT is a tagged union. Even though this helper only sends keyboard
+    # events, the union must include its largest Windows member so ctypes uses
+    # the native INPUT size (40 bytes on 64-bit Windows). A keyboard-only union
+    # is smaller and causes SendInput to reject the entire array with
+    # ERROR_INVALID_PARAMETER.
+    _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT), ("hi", HARDWAREINPUT)]
 
 
 class INPUT(ctypes.Structure):
@@ -141,6 +165,8 @@ def keyboard_input(*, virtual_key: int = 0, scan_code: int = 0, flags: int = 0) 
 
 def send_secret(pin: str) -> None:
     user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
+    user32.SendInput.restype = wintypes.UINT
     inputs: list[INPUT] = []
     for char in pin:
         inputs.append(keyboard_input(scan_code=ord(char), flags=KEYEVENTF_UNICODE))
@@ -148,9 +174,14 @@ def send_secret(pin: str) -> None:
     inputs.append(keyboard_input(virtual_key=VK_RETURN))
     inputs.append(keyboard_input(virtual_key=VK_RETURN, flags=KEYEVENTF_KEYUP))
     array = (INPUT * len(inputs))(*inputs)
+    ctypes.set_last_error(0)
     sent = user32.SendInput(len(array), array, ctypes.sizeof(INPUT))
     if sent != len(array):
-        raise RuntimeError("Windows did not accept the complete secure PIN input sequence")
+        error_code = ctypes.get_last_error()
+        raise RuntimeError(
+            "Windows did not accept the complete secure PIN input sequence "
+            f"(sent {sent} of {len(array)} inputs; Win32 error {error_code})"
+        )
 
 
 def execute(args: argparse.Namespace) -> dict[str, object]:
