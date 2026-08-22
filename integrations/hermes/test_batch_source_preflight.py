@@ -85,3 +85,46 @@ def test_rejects_stale_or_duplicate_nextgear_rows(tmp_path: Path) -> None:
     assert result["ready"] is False
     assert result["nextgear"]["all_unique"] is False
     assert result["nextgear"]["age_ok"] is False
+
+
+def test_accepts_approved_at_auction_and_collateral_verified_rows(tmp_path: Path) -> None:
+    nextgear = tmp_path / "Exportable Inventory.xlsx"
+    stock_sheet = tmp_path / "LA.xlsx"
+    save_book(
+        nextgear,
+        ["Floorplan Status", "Vehicle Status", "VIN", "Source", "Principal + One Day Loan"],
+        [
+            ["Approved", "At Auction", "WP1AA2A59KLB00525", "Manheim", 18320],
+            ["Approved", "Collateral Verified", "W1N0G8DBXNV374754", "Manheim", 18530],
+        ],
+    )
+    save_book(stock_sheet, ["Stock", "VIN"], [])
+
+    completed = run_helper(tmp_path, nextgear, stock_sheet)
+    result = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
+
+    assert completed.returncode == 0
+    assert result["ready"] is True
+    assert result["nextgear"]["all_in_stock"] is False
+    assert result["nextgear"]["all_active_floorplans"] is True
+
+
+def test_rejects_nonapproved_or_inactive_rows(tmp_path: Path) -> None:
+    nextgear = tmp_path / "Exportable Inventory.xlsx"
+    stock_sheet = tmp_path / "LA.xlsx"
+    save_book(
+        nextgear,
+        ["Floorplan Status", "Vehicle Status", "VIN"],
+        [
+            ["Pending", "At Auction", "WP1AA2A59KLB00525"],
+            ["Approved", "Paid Off", "W1N0G8DBXNV374754"],
+        ],
+    )
+    save_book(stock_sheet, ["Stock", "VIN"], [])
+
+    completed = run_helper(tmp_path, nextgear, stock_sheet)
+    result = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
+
+    assert completed.returncode == 2
+    assert result["ready"] is False
+    assert result["nextgear"]["all_active_floorplans"] is False

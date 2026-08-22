@@ -20,6 +20,8 @@ import openpyxl
 
 
 VIN_RE = re.compile(r"^[A-HJ-NPR-Z0-9]{17}$")
+ACTIVE_VEHICLE_STATUSES = {"in stock", "at auction", "collateral verified"}
+ACTIVE_FLOORPLAN_STATUSES = {"approved"}
 
 
 def normalize_vin(value: object) -> str:
@@ -124,9 +126,22 @@ def main() -> int:
         nextgear_rows: dict[str, Any] = {}
         for vin, rows in nextgear_matches.items():
             status = field_value(rows[0]["fields"], "Vehicle Status", "Status") if len(rows) == 1 else ""
+            floorplan_status = (
+                field_value(rows[0]["fields"], "Floorplan Status") if len(rows) == 1 else ""
+            )
+            normalized_status = status.lower()
+            normalized_floorplan = floorplan_status.lower()
             nextgear_rows[vin] = {
                 "match_count": len(rows),
                 "vehicle_status": status,
+                "floorplan_status": floorplan_status,
+                "active_floorplan": (
+                    normalized_status in ACTIVE_VEHICLE_STATUSES
+                    and (
+                        not normalized_floorplan
+                        or normalized_floorplan in ACTIVE_FLOORPLAN_STATUSES
+                    )
+                ),
                 "matches": rows,
             }
 
@@ -135,9 +150,12 @@ def main() -> int:
             item["vehicle_status"].lower() == "in stock"
             for item in nextgear_rows.values()
         )
+        active_floorplans = all(
+            item["active_floorplan"] for item in nextgear_rows.values()
+        )
         age_ok = age_hours <= args.max_nextgear_age_hours
         result = {
-            "ready": unique and in_stock and age_ok,
+            "ready": unique and active_floorplans and age_ok,
             "generated_at_utc": datetime.now(timezone.utc).isoformat(),
             "nextgear": {
                 "path": str(args.nextgear_export.resolve()),
@@ -146,6 +164,8 @@ def main() -> int:
                 "age_ok": age_ok,
                 "all_unique": unique,
                 "all_in_stock": in_stock,
+                "all_active_floorplans": active_floorplans,
+                "accepted_vehicle_statuses": sorted(ACTIVE_VEHICLE_STATUSES),
                 "vehicles": nextgear_rows,
             },
             "target_store_sheet": {
