@@ -216,8 +216,8 @@ do {
 if (-not $health -or $health.status -ne 'ok') { throw 'Hermes webhook health check failed after restart' }
 
 [PSCustomObject]@{
-    trigger_secret = $triggerSecret
-    callback_secret = $callbackSecret
+    trigger_secret_configured = ($triggerSecret.Length -ge 32)
+    callback_secret_configured = ($callbackSecret.Length -ge 16)
     webhook_health = $health.status
     helper_path = (Join-Path $toolsDir 'dashboard_callback.py')
     focus_helper_path = (Join-Path $toolsDir 'focus_autosoft_rdp.py')
