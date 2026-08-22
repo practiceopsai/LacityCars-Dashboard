@@ -149,6 +149,7 @@ def scan_stock_sheet(path: Path, prefix: str, vins: list[str]) -> dict[str, Any]
                     "row": row_number,
                     "row_values_before": values_before,
                     "stock_collision_count": int(number in existing_numbers),
+                    "sheet_action": "APPEND_NEW",
                 }
             )
     elif (
@@ -182,11 +183,82 @@ def scan_stock_sheet(path: Path, prefix: str, vins: list[str]) -> dict[str, Any]
                     "row": item["row"],
                     "row_values_before": item["row_values_before"],
                     "stock_collision_count": 0,
+                    "sheet_action": "REUSE_EXISTING",
                 }
                 for item in ordered
             ]
-    elif 0 < present_count < len(vins):
-        plan_mode = "MIXED_EXISTING_ROWS"
+        else:
+            plan_mode = "REUSE_EXISTING_ROWS"
+            candidates = [
+                {
+                    "vin": item["vin"],
+                    "stock": item["stock"],
+                    "row": item["row"],
+                    "row_values_before": item["row_values_before"],
+                    "stock_collision_count": 0,
+                    "sheet_action": "REUSE_EXISTING",
+                }
+                for item in ordered
+            ]
+    else:
+        # A prior safe run may already have written one or more authorized VINs
+        # while later children never reached the sheet. Reusing each unique,
+        # stock-numbered VIN row and reserving fresh tail rows for only the
+        # missing VINs is collision-safe and avoids duplicating sheet records.
+        existing_are_unique = all(
+            vin_counts[vin] in (0, 1)
+            and (vin_counts[vin] == 0 or len(payload_rows[vin]) == 1)
+            for vin in vins
+        )
+        existing_have_stocks = all(
+            vin_counts[vin] == 0
+            or (
+                payload_rows[vin][0]["stock_number"] is not None
+                and bool(payload_rows[vin][0]["stock"])
+            )
+            for vin in vins
+        )
+        if existing_are_unique and existing_have_stocks:
+            next_number = max_number
+            next_row = max_row
+            for vin in vins:
+                if vin_counts[vin] == 1:
+                    item = payload_rows[vin][0]
+                    candidates.append(
+                        {
+                            "vin": vin,
+                            "stock": item["stock"],
+                            "row": item["row"],
+                            "row_values_before": item["row_values_before"],
+                            "stock_collision_count": 0,
+                            "sheet_action": "REUSE_EXISTING",
+                        }
+                    )
+                    continue
+
+                next_number += 1
+                next_row += 1
+                values_before = (
+                    list(rows[next_row - 1][:11]) if next_row <= len(rows) else [None] * 11
+                )
+                values_before += [None] * (11 - len(values_before))
+                candidates.append(
+                    {
+                        "vin": vin,
+                        "stock": f"{prefix.upper()}{next_number:0{width}d}",
+                        "row": next_row,
+                        "row_values_before": values_before[:11],
+                        "stock_collision_count": int(next_number in existing_numbers),
+                        "sheet_action": "APPEND_NEW",
+                    }
+                )
+            plan_mode = (
+                "REUSE_EXISTING_ROWS"
+                if present_count == len(vins)
+                else "REUSE_EXISTING_AND_APPEND"
+            )
+        elif 0 < present_count < len(vins):
+            plan_mode = "MIXED_EXISTING_ROWS"
 
     return {
         "path": str(path.resolve()),
@@ -278,6 +350,18 @@ def main() -> int:
         and sheet.get("resume_safe")
         and all(count == 1 for count in sheet.get("payload_vin_counts", {}).values())
         and len(sheet.get("candidates", [])) == len(vins)
+    ) or bool(
+        sheet.get("plan_mode") in {"REUSE_EXISTING_ROWS", "REUSE_EXISTING_AND_APPEND"}
+        and len(sheet.get("candidates", [])) == len(vins)
+        and len({candidate["stock"] for candidate in sheet.get("candidates", [])}) == len(vins)
+        and all(
+            candidate["stock_collision_count"] == 0
+            and (
+                candidate.get("sheet_action") == "REUSE_EXISTING"
+                or all(value is None for value in candidate["row_values_before"])
+            )
+            for candidate in sheet.get("candidates", [])
+        )
     )
 
     ready = not errors and all(

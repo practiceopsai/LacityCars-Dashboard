@@ -140,8 +140,34 @@ def save_mixed_rows(path: Path) -> None:
     workbook.save(path)
 
 
-def test_rejects_mixed_existing_and_missing_payload_rows(tmp_path: Path) -> None:
+def test_reuses_unique_existing_rows_and_appends_only_missing_vins(tmp_path: Path) -> None:
     completed, result = run(tmp_path, request_payload(), save_mixed_rows)
+
+    assert completed.returncode == 0
+    assert result["ready"] is True
+    assert result["sheet"]["plan_mode"] == "REUSE_EXISTING_AND_APPEND"
+    assert [item["stock"] for item in result["sheet"]["candidates"]] == [
+        "S2427",
+        "S2428",
+        "S2429",
+    ]
+    assert [item["sheet_action"] for item in result["sheet"]["candidates"]] == [
+        "REUSE_EXISTING",
+        "APPEND_NEW",
+        "APPEND_NEW",
+    ]
+
+
+def save_duplicate_existing_vin(path: Path) -> None:
+    save_mixed_rows(path)
+    workbook = load_workbook(path)
+    sheet = workbook["Sheet1"]
+    sheet.append([None, "S2428", None, "WP1AA2A59KLB00525"])
+    workbook.save(path)
+
+
+def test_rejects_duplicate_existing_payload_vin(tmp_path: Path) -> None:
+    completed, result = run(tmp_path, request_payload(), save_duplicate_existing_vin)
 
     assert completed.returncode == 2
     assert result["ready"] is False
@@ -156,9 +182,13 @@ def save_non_tail_rows(path: Path) -> None:
     workbook.save(path)
 
 
-def test_rejects_payload_rows_that_are_not_the_sheet_tail(tmp_path: Path) -> None:
+def test_reuses_unique_payload_rows_that_are_not_the_sheet_tail(tmp_path: Path) -> None:
     completed, result = run(tmp_path, request_payload(), save_non_tail_rows)
 
-    assert completed.returncode == 2
-    assert result["ready"] is False
-    assert result["sheet"]["plan_mode"] == "UNSAFE_EXISTING_ROWS"
+    assert completed.returncode == 0
+    assert result["ready"] is True
+    assert result["sheet"]["plan_mode"] == "REUSE_EXISTING_ROWS"
+    assert all(
+        item["sheet_action"] == "REUSE_EXISTING"
+        for item in result["sheet"]["candidates"]
+    )
