@@ -56,6 +56,13 @@ class PromptScheduleClockTests(unittest.TestCase):
             configure,
         )
 
+    def test_browser_use_reuses_one_approved_named_session(self) -> None:
+        prompt = (ROOT / "vehicle-ready-prompt.txt").read_text(encoding="utf-8")
+        configure = (ROOT / "configure_orgo_webhook.ps1").read_text(encoding="utf-8")
+        for policy in (prompt, configure):
+            self.assertIn("fixed named session `vehicle-stocking`", policy)
+            self.assertIn("never create an unnamed or alternate Browser Use session", policy)
+
 
 if __name__ == "__main__":
     unittest.main()
