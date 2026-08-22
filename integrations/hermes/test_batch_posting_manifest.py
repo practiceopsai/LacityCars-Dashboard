@@ -80,6 +80,63 @@ internals:
         with self.assertRaisesRegex(ValueError, "verified color is required"):
             target.build(self.args())
 
+    def test_uses_la_sheet_layout_without_shifting_mileage_into_color(self):
+        validation = json.loads(self.validation.read_text(encoding="utf-8"))
+        validation["sheet"]["candidates"][0].update({
+            "stock": "L12870",
+            "row_values_before": [
+                None,
+                "L12870",
+                None,
+                VIN1,
+                2020,
+                "MERCEDES-BENZ",
+                "GLE 350 4MATIC",
+                73218,
+                21150,
+                "S FL AUTO AUCTION",
+            ],
+        })
+        validation["sheet"]["candidates"][1]["stock"] = "L12930"
+        self.validation.write_text(json.dumps(validation), encoding="utf-8")
+        self.registry.write_text("""display_name: LA City
+stock_sheet:
+  columns:
+    stock: B
+    vin: D
+    year: E
+    make: F
+    model: G
+    mileage: H
+    acv: I
+  color_column: null
+  stock_pattern: 'L#####'
+autosoft:
+  host: laci81.autosoftflex.com:7069
+  instance_title: LA City Cars
+  used_car_line: 9C
+  used_truck_line: 9T
+  used_car_inventory_gl: 24000
+  used_truck_inventory_gl: 24100
+  floorplan_gl: 31100
+  transport_gl: 31105
+internals:
+  pack: {amount: 1761, credit_gl: 33115}
+  lojack: {amount: 134, credit_gl: 33126}
+  csc3mpro: {amount: 55, credit_gl: 33127}
+  cilajet: {amount: 54, credit_gl: 33128}
+  total: 2004
+""", encoding="utf-8")
+
+        result = target.build(self.args([f"{VIN1}=SILVER", f"{VIN2}=BLACK"]))
+
+        self.assertEqual(result["vehicles"][0]["color"], "SILVER")
+        self.assertEqual([item["columns"] for item in result["sheet"]["blocks"]], ["B", "D:I"])
+        self.assertEqual(
+            (self.root / "posting-sheet-D-I-2432-2432.tsv").read_text(encoding="utf-8"),
+            f"{VIN2}\t2023\tMERCEDES-BENZ\tC 300 SEDAN\t48457\t24815.0\n",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

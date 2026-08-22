@@ -76,6 +76,50 @@ def inline_amounts(text: str) -> dict[str, dict[str, int] | int]:
     return result
 
 
+def sheet_columns(text: str) -> dict[str, str]:
+    """Read the store-specific stock-sheet column map.
+
+    Older bootstrap fixtures predate the explicit map and use the Columbia
+    layout, so retain that layout as a backwards-compatible default.
+    """
+    defaults = {
+        "stock": "B",
+        "vin": "D",
+        "year": "E",
+        "make": "F",
+        "model": "G",
+        "color": "H",
+        "mileage": "I",
+        "acv": "K",
+    }
+    lines = text.splitlines()
+    start = next(
+        (index for index, line in enumerate(lines) if re.match(r"^\s*columns:\s*$", line)),
+        None,
+    )
+    if start is None:
+        return defaults
+    base_indent = len(lines[start]) - len(lines[start].lstrip())
+    body_lines: list[str] = []
+    for line in lines[start + 1 :]:
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent <= base_indent:
+            break
+        body_lines.append(line)
+    result: dict[str, str] = {}
+    for line in body_lines:
+        match = re.match(r"\s*(\w+):\s*['\"]?([A-Za-z]+)['\"]?\s*$", line)
+        if match:
+            result[match.group(1)] = match.group(2).upper()
+    required = {"stock", "vin", "year", "make", "model", "mileage", "acv"}
+    missing = sorted(required - result.keys())
+    if missing:
+        raise ValueError(f"store registry stock_sheet.columns is missing {', '.join(missing)}")
+    return result
+
+
 def parse_registry(path: Path) -> dict[str, Any]:
     text = path.read_text(encoding="utf-8")
     autosoft = section(text, "autosoft")
@@ -97,6 +141,7 @@ def parse_registry(path: Path) -> dict[str, Any]:
         "floorplan_gl": integer(autosoft, "floorplan_gl"),
         "transport_gl": integer(autosoft, "transport_gl"),
         "internals": inline_amounts(internals),
+        "sheet_columns": sheet_columns(stock_sheet),
     }
 
 
@@ -153,19 +198,51 @@ def groups(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
     return result
 
 
-def build_blocks(output: Path, vehicles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def column_number(value: str) -> int:
+    result = 0
+    for char in value.upper():
+        if not "A" <= char <= "Z":
+            raise ValueError(f"invalid sheet column {value!r}")
+        result = result * 26 + ord(char) - ord("A") + 1
+    return result
+
+
+def build_blocks(
+    output: Path, vehicles: list[dict[str, Any]], sheet_column_map: dict[str, str]
+) -> list[dict[str, Any]]:
     pending = [item for item in vehicles if item["sheet_action"] == "APPEND_NEW"]
     blocks: list[dict[str, Any]] = []
-    columns = {
-        "B": lambda item: [item["stock_number"]],
-        "D:I": lambda item: [
-            item["vin"], item["year"], item["make"], item["model"], item["color"], item["mileage"]
-        ],
-        "K": lambda item: [item["acv"]],
+    value_keys = {
+        "stock": "stock_number",
+        "vin": "vin",
+        "year": "year",
+        "make": "make",
+        "model": "model",
+        "color": "color",
+        "mileage": "mileage",
+        "acv": "acv",
+        "source": "source_full",
     }
+    configured = sorted(
+        (
+            (column_number(column), column, logical_name, value_keys[logical_name])
+            for logical_name, column in sheet_column_map.items()
+            if logical_name in value_keys
+        ),
+        key=lambda item: item[0],
+    )
+    column_groups: list[list[tuple[int, str, str, str]]] = []
+    for configured_column in configured:
+        if not column_groups or configured_column[0] != column_groups[-1][-1][0] + 1:
+            column_groups.append([configured_column])
+        else:
+            column_groups[-1].append(configured_column)
     for group in groups(pending):
-        for columns_name, values_for in columns.items():
-            rows = [values_for(item) for item in group]
+        for configured_group in column_groups:
+            first_column = configured_group[0][1]
+            last_column = configured_group[-1][1]
+            columns_name = first_column if first_column == last_column else f"{first_column}:{last_column}"
+            rows = [[item[value_key] for _, _, _, value_key in configured_group] for item in group]
             start = group[0]["sheet_row"]
             end = group[-1]["sheet_row"]
             suffix = columns_name.replace(":", "-")
@@ -222,7 +299,14 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         make = normalized(decoded_vehicle.get("Make"))
         model = description_model(fields.get("Vehicle Description", ""), year, make, decoded_vehicle.get("Model", ""))
         before = candidate.get("row_values_before") or []
-        color = colors.get(vin) or (normalized(before[7]) if len(before) > 7 else "") or normalized(fields.get("Color"))
+        color_column = registry["sheet_columns"].get("color")
+        color_index = column_number(color_column) - 1 if color_column else None
+        existing_color = (
+            normalized(before[color_index])
+            if color_index is not None and len(before) > color_index
+            else ""
+        )
+        color = colors.get(vin) or existing_color or normalized(fields.get("Color"))
         if not color:
             raise ValueError(f"verified color is required for {vin}; pass --color {vin}=COLOR")
         mileage = int(float(fields["Odometer"]))
@@ -267,10 +351,26 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             "autosoft_status": "PENDING",
         }
         if candidate["sheet_action"] == "REUSE_EXISTING":
-            expected = [None, vehicle["stock_number"], None, vin, year, make, model, color, mileage, None, acv]
-            for index in (1, 3, 4, 5, 6, 7, 8, 10):
-                if len(before) <= index or normalized(before[index]) != normalized(expected[index]):
-                    raise ValueError(f"existing sheet row mismatch for {vin} at column index {index}")
+            expected_values = {
+                "stock": vehicle["stock_number"],
+                "vin": vin,
+                "year": year,
+                "make": make,
+                "model": model,
+                "color": color,
+                "mileage": mileage,
+                "acv": acv,
+                "source": source_full,
+            }
+            for logical_name, column in registry["sheet_columns"].items():
+                if logical_name not in expected_values:
+                    continue
+                index = column_number(column) - 1
+                expected = expected_values[logical_name]
+                if len(before) <= index or normalized(before[index]) != normalized(expected):
+                    raise ValueError(
+                        f"existing sheet row mismatch for {vin} at {column} ({logical_name})"
+                    )
         vehicles.append(vehicle)
 
     result = {
@@ -282,6 +382,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             "autosoft_instance": registry["instance"],
             "rdp_window_title": registry["rdp_title"],
             "stock_prefix": registry["stock_prefix"],
+            "sheet_columns": registry["sheet_columns"],
             "floorplan_gl": registry["floorplan_gl"],
             "transport_gl": registry["transport_gl"],
             "internals": registry["internals"],
@@ -293,7 +394,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         },
         "vehicles": vehicles,
     }
-    result["sheet"]["blocks"] = build_blocks(args.output, vehicles)
+    result["sheet"]["blocks"] = build_blocks(args.output, vehicles, registry["sheet_columns"])
     return result
 
 
