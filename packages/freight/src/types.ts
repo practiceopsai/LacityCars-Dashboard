@@ -1,5 +1,7 @@
 /** One data row extracted from the dispatch workbook. Values are raw cell contents. */
 export interface DispatchRow {
+  /** Source worksheet; absent only for legacy/programmatically supplied rows. */
+  worksheetName?: string;
   /** 1-based row number in the worksheet, for evidence/audit. */
   rowNumber: number;
   vin: unknown;
@@ -9,6 +11,8 @@ export interface DispatchRow {
 }
 
 export interface FreightEvidence {
+  /** Worksheet containing the matched load. */
+  worksheetName?: string;
   loadId: string;
   loadPrice: number;
   distinctVinCount: number;

@@ -30,28 +30,35 @@ export function calculateFreight(rows: DispatchRow[], rawVin: string): FreightRe
     };
   }
 
-  const loadIds = new Set<string>();
+  const loadKeys = new Set<string>();
   for (const row of matchedRows) {
     const loadId = normalizeLoadId(row.loadId);
-    if (loadId) loadIds.add(loadId);
+    if (loadId) loadKeys.add(`${row.worksheetName ?? ""}\u0000${loadId}`);
   }
-  if (loadIds.size === 0) {
+  if (loadKeys.size === 0) {
     return {
       found: false,
       reason: "NO_ACTIVE_LOAD",
       detail: `VIN ${targetVin} matched rows ${matchedRows.map((r) => r.rowNumber).join(", ")} but none carry a load ID`,
     };
   }
-  if (loadIds.size > 1) {
+  if (loadKeys.size > 1) {
     return {
       found: false,
       reason: "MULTIPLE_ACTIVE_LOADS",
-      detail: `VIN ${targetVin} appears on multiple active loads (${[...loadIds].join(", ")}); cannot attribute freight`,
+      detail: `VIN ${targetVin} appears on multiple active worksheet/load pairs; cannot attribute freight`,
     };
   }
-  const loadId = [...loadIds][0]!;
+  const loadKey = [...loadKeys][0]!;
+  const separator = loadKey.indexOf("\u0000");
+  const worksheetName = loadKey.slice(0, separator) || undefined;
+  const loadId = loadKey.slice(separator + 1);
 
-  const loadRows = activeRows.filter((row) => normalizeLoadId(row.loadId) === loadId);
+  const loadRows = activeRows.filter(
+    (row) =>
+      (row.worksheetName ?? "") === (worksheetName ?? "") &&
+      normalizeLoadId(row.loadId) === loadId,
+  );
 
   const distinctVins = new Set<string>();
   for (const row of loadRows) {
@@ -86,6 +93,7 @@ export function calculateFreight(rows: DispatchRow[], rawVin: string): FreightRe
     found: true,
     amount,
     evidence: {
+      worksheetName,
       loadId,
       loadPrice,
       distinctVinCount: distinctVins.size,

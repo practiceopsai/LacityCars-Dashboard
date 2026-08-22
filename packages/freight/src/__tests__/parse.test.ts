@@ -62,6 +62,43 @@ describe("parseDispatchWorkbook", () => {
     expect(result.evidence.distinctVinCount).toBe(2);
   });
 
+  it("scans every worksheet and preserves worksheet-local row numbers", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const lp = workbook.addWorksheet("LP");
+    lp.addRow(["VIN", "Load ID", "Load Price", "Status"]);
+    lp.addRow([VIN_A, "LOAD-100", 300, "Dispatched"]);
+
+    const columbia = workbook.addWorksheet("Columbia");
+    columbia.addRow(["Columbia dispatch report"]);
+    columbia.addRow(["Status", "Load Price", "VIN #", "Load ID"]);
+    // Reuse the same load ID to prove different store tabs cannot mix.
+    columbia.addRow(["Dispatched", 900, VIN_B, "LOAD-100"]);
+    columbia.addRow(["Dispatched", 900, "3HGCM82633A004354", "LOAD-100"]);
+    columbia.addRow(["Dispatched", 900, VIN_B, "LOAD-100"]); // duplicate VIN row
+
+    const buffer = Buffer.from(await workbook.xlsx.writeBuffer());
+    const rows = await parseDispatchWorkbook(buffer);
+    expect(rows.map((row) => [row.worksheetName, row.rowNumber])).toEqual([
+      ["LP", 2],
+      ["Columbia", 3],
+      ["Columbia", 4],
+      ["Columbia", 5],
+    ]);
+
+    const lpResult = calculateFreight(rows, VIN_A);
+    expect(lpResult.found).toBe(true);
+    if (lpResult.found) expect(lpResult.amount).toBe(300);
+
+    const columbiaResult = calculateFreight(rows, VIN_B);
+    expect(columbiaResult.found).toBe(true);
+    if (!columbiaResult.found) return;
+    expect(columbiaResult.amount).toBe(450);
+    expect(columbiaResult.evidence.worksheetName).toBe("Columbia");
+    expect(columbiaResult.evidence.distinctVinCount).toBe(2);
+    expect(columbiaResult.evidence.matchedRowNumbers).toEqual([3, 5]);
+    expect(columbiaResult.evidence.loadRowNumbers).toEqual([3, 4, 5]);
+  });
+
   it("throws a typed error when no header row exists", async () => {
     const buffer = await buildWorkbook([
       ["Just", "Random", "Columns"],

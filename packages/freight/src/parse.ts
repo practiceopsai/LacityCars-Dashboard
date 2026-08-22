@@ -78,8 +78,9 @@ export class WorkbookParseError extends Error {
 
 /**
  * Parse a dispatch workbook (.xlsx) buffer into raw DispatchRows.
- * Scans the first sheet's opening rows for a header row containing VIN,
- * load ID, and load price columns (by name), then reads every following row.
+ * Scans every sheet's opening rows for a header row containing VIN, load ID,
+ * and load price columns (by name), then reads every following row. Row numbers
+ * remain local to their source worksheet for evidence/audit purposes.
  */
 export async function parseDispatchWorkbook(buffer: Buffer | ArrayBuffer): Promise<DispatchRow[]> {
   const workbook = new ExcelJS.Workbook();
@@ -92,41 +93,49 @@ export async function parseDispatchWorkbook(buffer: Buffer | ArrayBuffer): Promi
     );
   }
 
-  const worksheet = workbook.worksheets[0];
-  if (!worksheet) throw new WorkbookParseError("Workbook contains no worksheets");
+  const rows: DispatchRow[] = [];
+  let locatedHeader = false;
 
-  let columns: ResolvedColumns | null = null;
-  let headerRowNumber = 0;
-  for (let r = 1; r <= Math.min(HEADER_SCAN_ROWS, worksheet.rowCount); r++) {
-    const row = worksheet.getRow(r);
-    const cells: Array<string | null> = [];
-    row.eachCell({ includeEmpty: true }, (cell, col) => {
-      cells[col - 1] = cell.value === null || cell.value === undefined ? null : String(cellValue(cell));
-    });
-    columns = resolveColumns(cells);
-    if (columns) {
-      headerRowNumber = r;
-      break;
+  for (const worksheet of workbook.worksheets) {
+    let columns: ResolvedColumns | null = null;
+    let headerRowNumber = 0;
+    for (let r = 1; r <= Math.min(HEADER_SCAN_ROWS, worksheet.rowCount); r++) {
+      const row = worksheet.getRow(r);
+      const cells: Array<string | null> = [];
+      row.eachCell({ includeEmpty: true }, (cell, col) => {
+        cells[col - 1] =
+          cell.value === null || cell.value === undefined ? null : String(cellValue(cell));
+      });
+      columns = resolveColumns(cells);
+      if (columns) {
+        headerRowNumber = r;
+        locatedHeader = true;
+        break;
+      }
     }
+    if (!columns || headerRowNumber === 0) continue;
+    const resolved = columns;
+
+    worksheet.eachRow((row, rowNumber) => {
+      if (rowNumber <= headerRowNumber) return;
+      const vin = cellValue(row.getCell(resolved.vin + 1));
+      const loadId = cellValue(row.getCell(resolved.loadId + 1));
+      const loadPrice = cellValue(row.getCell(resolved.loadPrice + 1));
+      const status =
+        resolved.status !== undefined ? cellValue(row.getCell(resolved.status + 1)) : null;
+      // Skip fully empty spacer rows.
+      if (vin === null && loadId === null && loadPrice === null) return;
+      rows.push({ worksheetName: worksheet.name, rowNumber, vin, loadId, loadPrice, status });
+    });
   }
-  if (!columns || headerRowNumber === 0) {
+
+  if (!locatedHeader) {
+    if (workbook.worksheets.length === 0) {
+      throw new WorkbookParseError("Workbook contains no worksheets");
+    }
     throw new WorkbookParseError(
       "Could not locate a header row with VIN, load ID, and load price columns",
     );
   }
-  const resolved = columns;
-
-  const rows: DispatchRow[] = [];
-  worksheet.eachRow((row, rowNumber) => {
-    if (rowNumber <= headerRowNumber) return;
-    const vin = cellValue(row.getCell(resolved.vin + 1));
-    const loadId = cellValue(row.getCell(resolved.loadId + 1));
-    const loadPrice = cellValue(row.getCell(resolved.loadPrice + 1));
-    const status =
-      resolved.status !== undefined ? cellValue(row.getCell(resolved.status + 1)) : null;
-    // Skip fully empty spacer rows.
-    if (vin === null && loadId === null && loadPrice === null) return;
-    rows.push({ rowNumber, vin, loadId, loadPrice, status });
-  });
   return rows;
 }
