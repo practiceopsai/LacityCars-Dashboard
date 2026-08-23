@@ -60,7 +60,16 @@ def main() -> int:
     ]
     config.setdefault("computer_use", {})["grant_existing_profile"] = True
     config.setdefault("gateway", {})["loop_watchdog"] = False
-    config["command_allowlist"] = ["python tools/batch_checkpoint.py *"]
+    config["command_allowlist"] = [
+        "python tools/batch_source_preflight.py *",
+        "python tools/batch_manifest_preflight.py *",
+        "python tools/batch_vpic_decode.py *",
+        "python tools/batch_posting_manifest.py *",
+        "python tools/batch_checkpoint.py *",
+        "python tools/focus_autosoft_rdp.py *",
+        "python tools/autosoft_pin_login.py *",
+        "python tools/dashboard_callback.py *",
+    ]
 
     backup = config_path.with_suffix(config_path.suffix + ".pre-prompt-hotfix")
     if not backup.exists():

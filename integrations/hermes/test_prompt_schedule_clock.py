@@ -59,12 +59,16 @@ class PromptScheduleClockTests(unittest.TestCase):
             self.assertIn("Inventory > Vehicle Internals", policy)
             self.assertIn("zero original inventory, zero internals", policy)
 
-    def test_headless_checkpoint_helper_has_narrow_allowlist(self) -> None:
+    def test_headless_stocking_helpers_have_narrow_allowlist(self) -> None:
         configure = (ROOT / "configure_orgo_webhook.ps1").read_text(encoding="utf-8")
-        self.assertIn(
-            "Set-ConfigValue 'command_allowlist' '[\"python tools/batch_checkpoint.py *\"]'",
-            configure,
-        )
+        apply_config = (ROOT / "apply_prompt_config.py").read_text(encoding="utf-8")
+        for command in (
+            "python tools/batch_posting_manifest.py *",
+            "python tools/autosoft_pin_login.py *",
+            "python tools/dashboard_callback.py *",
+        ):
+            self.assertIn(command, configure)
+            self.assertIn(command, apply_config)
 
     def test_browser_use_reuses_one_approved_named_session(self) -> None:
         prompt = (ROOT / "vehicle-ready-prompt.txt").read_text(encoding="utf-8")

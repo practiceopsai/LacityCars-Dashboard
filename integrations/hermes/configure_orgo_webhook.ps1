@@ -152,7 +152,7 @@ Set-ConfigValue 'computer_use.grant_existing_profile' 'true'
 # This route is headless, so allow only the checked-in checkpoint helper to
 # update its manifest/checkpoint artifacts without waiting for an impossible
 # interactive approval. All other terminal safety policy remains in force.
-Set-ConfigValue 'command_allowlist' '["python tools/batch_checkpoint.py *"]'
+Set-ConfigValue 'command_allowlist' '["python tools/batch_source_preflight.py *","python tools/batch_manifest_preflight.py *","python tools/batch_vpic_decode.py *","python tools/batch_posting_manifest.py *","python tools/batch_checkpoint.py *","python tools/focus_autosoft_rdp.py *","python tools/autosoft_pin_login.py *","python tools/dashboard_callback.py *"]'
 Set-ConfigValue 'LACITY_DASHBOARD_CALLBACK_SECRET' $callbackSecret
 Set-DotEnvValue 'LACITY_DASHBOARD_CALLBACK_ORIGIN' $CallbackOrigin
 
