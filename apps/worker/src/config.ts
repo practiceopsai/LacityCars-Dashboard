@@ -22,7 +22,12 @@ const EnvSchema = z
     FREIGHT_BACKOFF_MAX_MS: z.coerce.number().int().min(1000).default(DEFAULT_FREIGHT_BACKOFF_MAX_MS),
     FREIGHT_SWEEP_CRON: z.string().min(1).default("0 8,20 * * *"),
     FREIGHT_SWEEP_TIME_ZONE: z.string().min(1).default("America/New_York"),
-    HERMES_TIMEOUT_MS: z.coerce.number().int().min(1000).default(30_000),
+    // The Orgo transport waits for the Windows gateway's HTTP response. On
+    // the 1-vCPU desktop, Hermes may need over 30 seconds to allocate a fresh
+    // webhook session even though it has already accepted the delivery.
+    // Keep this above the forwarding command's timeout so a valid acceptance
+    // cannot be mistaken for a failed trigger and release the desktop lock.
+    HERMES_TIMEOUT_MS: z.coerce.number().int().min(180_000).default(240_000),
     HERMES_BUSY_DELAY_MS: z.coerce.number().int().min(5_000).default(30_000),
     HERMES_PROCESSING_TIMEOUT_MS: z.coerce.number().int().min(60_000).default(5_400_000),
     HERMES_WATCHDOG_INTERVAL_MS: z.coerce.number().int().min(10_000).default(60_000),

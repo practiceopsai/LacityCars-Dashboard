@@ -8,7 +8,7 @@ const config = {
   HERMES_ENDPOINT: "https://hermes.example.com/trigger",
   HERMES_TRIGGER_SECRET: "test-trigger-secret-at-least-32-characters",
   HERMES_PROXY_TOKEN: "test-orgo-proxy-token",
-  HERMES_TIMEOUT_MS: 5000,
+  HERMES_TIMEOUT_MS: 180000,
 } as WorkerConfig;
 
 const payload = {
@@ -74,6 +74,7 @@ describe("triggerHermes", () => {
     expect(headers.Authorization).toBe(`Bearer ${config.HERMES_PROXY_TOKEN}`);
     expect(headers["X-Webhook-Signature-V2"]).toBeUndefined();
     expect(outerBody.command).toContain("FromBase64String");
+    expect(outerBody.command).toContain("-TimeoutSec 180");
     expect(outerBody.command).not.toContain(payload.request_id);
     expect(outerBody.command).not.toContain(payload.callback_url);
   });

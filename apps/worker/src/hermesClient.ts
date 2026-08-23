@@ -37,7 +37,11 @@ function buildOrgoForwardCommand(
     `$body=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${toBase64(body)}'))`,
     `$requestId=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${toBase64(requestId)}'))`,
     `$headers=@{'X-Webhook-Timestamp'='${timestamp}';'X-Webhook-Signature-V2'='${signature}';'X-Request-ID'=$requestId}`,
-    "$response=Invoke-RestMethod -Method Post -Uri $url -Headers $headers -ContentType 'application/json' -Body $body -TimeoutSec 20",
+    // A fresh Hermes webhook session can take 20-30 seconds to allocate on
+    // the shared 1-vCPU Windows host. Timing out here is ambiguous: Hermes
+    // may have accepted the run while Railway thinks it failed and releases
+    // the store lock, allowing a second store to start concurrently.
+    "$response=Invoke-RestMethod -Method Post -Uri $url -Headers $headers -ContentType 'application/json' -Body $body -TimeoutSec 180",
     "$response | ConvertTo-Json -Compress",
   ].join("; ");
 }
