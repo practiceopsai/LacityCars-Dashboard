@@ -73,10 +73,18 @@ describe("triggerHermes", () => {
     const outerBody = JSON.parse(init.body as string) as { command: string };
     expect(headers.Authorization).toBe(`Bearer ${config.HERMES_PROXY_TOKEN}`);
     expect(headers["X-Webhook-Signature-V2"]).toBeUndefined();
-    expect(outerBody.command).toContain("FromBase64String");
-    expect(outerBody.command).toContain("-TimeoutSec 180");
+    expect(outerBody.command).toContain("Start-Process");
+    expect(outerBody.command).toContain("-WindowStyle','Hidden");
+    expect(outerBody.command).toContain("-EncodedCommand");
+    expect(outerBody.command).not.toContain("Invoke-RestMethod");
     expect(outerBody.command).not.toContain(payload.request_id);
     expect(outerBody.command).not.toContain(payload.callback_url);
+    const encoded = /-EncodedCommand','([^']+)'/.exec(outerBody.command)?.[1];
+    expect(encoded).toBeTruthy();
+    const deliveryScript = Buffer.from(encoded!, "base64").toString("utf16le");
+    expect(deliveryScript).toContain("FromBase64String");
+    expect(deliveryScript).toContain("Invoke-RestMethod");
+    expect(deliveryScript).toContain("-TimeoutSec 21600");
   });
 
   it("rejects an Orgo bridge command failure", async () => {

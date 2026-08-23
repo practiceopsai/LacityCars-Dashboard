@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import type { HermesDispatchPayload } from "@lacity/shared";
 import type { WorkerConfig } from "./config";
 
@@ -31,18 +31,37 @@ function buildOrgoForwardCommand(
 ): string {
   // Every dynamic string is base64-encoded before it enters PowerShell. This
   // keeps vehicle data and URLs out of command syntax and prevents injection.
-  return [
+  //
+  // Hermes keeps the webhook request open until the entire browser run has
+  // finished. Orgo commands, however, have a much shorter hard execution
+  // limit. Launch the signed localhost POST in a detached hidden process and
+  // return only after Windows confirms that process was created. Dashboard
+  // PROCESSING state remains the durable run lease and the signed terminal
+  // callback is the source of truth for completion.
+  const deliveryScript = [
     "$ErrorActionPreference='Stop'",
     `$url=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${toBase64(localUrl)}'))`,
     `$body=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${toBase64(body)}'))`,
     `$requestId=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${toBase64(requestId)}'))`,
     `$headers=@{'X-Webhook-Timestamp'='${timestamp}';'X-Webhook-Signature-V2'='${signature}';'X-Request-ID'=$requestId}`,
-    // A fresh Hermes webhook session can take 20-30 seconds to allocate on
-    // the shared 1-vCPU Windows host. Timing out here is ambiguous: Hermes
-    // may have accepted the run while Railway thinks it failed and releases
-    // the store lock, allowing a second store to start concurrently.
-    "$response=Invoke-RestMethod -Method Post -Uri $url -Headers $headers -ContentType 'application/json' -Body $body -TimeoutSec 180",
+    "$response=Invoke-RestMethod -Method Post -Uri $url -Headers $headers -ContentType 'application/json' -Body $body -TimeoutSec 21600",
     "$response | ConvertTo-Json -Compress",
+  ].join("; ");
+  // Windows PowerShell's -EncodedCommand consumes UTF-16LE.
+  const encodedDelivery = Buffer.from(deliveryScript, "utf16le").toString("base64");
+  const launchKey = createHash("sha256")
+    .update(`${requestId}.${timestamp}.${signature}`)
+    .digest("hex")
+    .slice(0, 20);
+
+  return [
+    "$ErrorActionPreference='Stop'",
+    "$dispatchDir='C:\\data\\lacity-hermes-dispatch'",
+    "[IO.Directory]::CreateDirectory($dispatchDir)|Out-Null",
+    `$stdout=Join-Path $dispatchDir '${launchKey}.stdout.log'`,
+    `$stderr=Join-Path $dispatchDir '${launchKey}.stderr.log'`,
+    `$process=Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-NonInteractive','-WindowStyle','Hidden','-EncodedCommand','${encodedDelivery}') -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru`,
+    `[pscustomobject]@{accepted=$true;process_id=$process.Id;request_key='${launchKey}'}|ConvertTo-Json -Compress`,
   ].join("; ");
 }
 

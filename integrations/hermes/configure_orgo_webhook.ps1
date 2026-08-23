@@ -11,6 +11,7 @@ param(
     [string]$BatchPostingManifestHelper = "$PSScriptRoot\batch_posting_manifest.py",
     [string]$BatchDecodeHelper = "$PSScriptRoot\batch_vpic_decode.py",
     [string]$BatchCheckpointHelper = "$PSScriptRoot\batch_checkpoint.py",
+    [string]$GatewayWatchdogPatch = "$PSScriptRoot\patch_windows_gateway_watchdog.py",
     [switch]$SkipGatewayRestart
 )
 
@@ -18,8 +19,10 @@ $ErrorActionPreference = 'Stop'
 $hermes = Join-Path $HermesHome 'hermes-agent\bin\hermes.exe'
 $config = Join-Path $HermesHome 'config.yaml'
 $envFile = Join-Path $HermesHome '.env'
+$agentRoot = Join-Path $HermesHome 'hermes-agent'
+$python = Join-Path $agentRoot 'venv\Scripts\python.exe'
 
-foreach ($required in $hermes, $config, $envFile, $RagRoot, $PromptFile, $CallbackHelper, $RdpFocusHelper, $AutoSoftPinHelper, $BatchSourceHelper, $BatchManifestHelper, $BatchPostingManifestHelper, $BatchDecodeHelper, $BatchCheckpointHelper) {
+foreach ($required in $hermes, $config, $envFile, $RagRoot, $PromptFile, $CallbackHelper, $RdpFocusHelper, $AutoSoftPinHelper, $BatchSourceHelper, $BatchManifestHelper, $BatchPostingManifestHelper, $BatchDecodeHelper, $BatchCheckpointHelper, $GatewayWatchdogPatch, $python) {
     if (-not (Test-Path -LiteralPath $required)) { throw "Required path missing: $required" }
 }
 
@@ -124,6 +127,24 @@ Set-ConfigValue 'compression.protect_last_n' '4'
 # task still supervises process exits, while dashboard processing timeouts and
 # per-VIN checkpoints supervise live stocking progress.
 Set-ConfigValue 'gateway.loop_watchdog' 'false'
+# Some Windows Hermes service builds expose GatewayRunner.config as a mapping,
+# which bypasses the upstream getattr-only opt-out check. Install the narrow,
+# idempotent compatibility patch and stamp the service environment as a second
+# explicit signal. This prevents cold model initialization on the one-core
+# desktop from being mistaken for a dead event loop.
+& $python $GatewayWatchdogPatch --agent-root $agentRoot | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Failed to patch the Hermes Windows gateway watchdog guard' }
+$gatewayVbs = Join-Path $HermesHome 'gateway-service\Hermes_Gateway.vbs'
+if (Test-Path -LiteralPath $gatewayVbs) {
+    $vbsText = [IO.File]::ReadAllText($gatewayVbs)
+    $detachedLine = 'env.Item("HERMES_GATEWAY_DETACHED") = "1"'
+    $watchdogLine = 'env.Item("HERMES_DISABLE_LOOP_WATCHDOG") = "1"'
+    if (-not $vbsText.Contains($watchdogLine)) {
+        if (-not $vbsText.Contains($detachedLine)) { throw 'Hermes gateway service launcher marker missing' }
+        $vbsText = $vbsText.Replace($detachedLine, $detachedLine + [Environment]::NewLine + $watchdogLine)
+        [IO.File]::WriteAllText($gatewayVbs, $vbsText, (New-Object Text.UTF8Encoding($false)))
+    }
+}
 # The stocking route is explicitly authorized to reuse the operator's saved
 # Chrome sessions. This eliminates repeated native fallback and allows the
 # typed browser layer to attach to the exact existing pid/window pair.
