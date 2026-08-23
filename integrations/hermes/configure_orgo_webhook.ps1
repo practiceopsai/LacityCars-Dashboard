@@ -117,6 +117,13 @@ Set-ConfigValue 'compression.proactive_prune_tokens' '60000'
 Set-ConfigValue 'compression.proactive_prune_min_result_chars' '6000'
 Set-ConfigValue 'compression.proactive_prune_min_reclaim_tokens' '15000'
 Set-ConfigValue 'compression.protect_last_n' '4'
+# Hermes initializes the agent synchronously on its asyncio event loop. On the
+# 1-vCPU Orgo host that cold load can legitimately exceed the default three
+# 30-second liveness probes; the built-in watchdog then kills an accepted
+# stocking session before its first model or tool call. The scheduled gateway
+# task still supervises process exits, while dashboard processing timeouts and
+# per-VIN checkpoints supervise live stocking progress.
+Set-ConfigValue 'gateway.loop_watchdog' 'false'
 # The stocking route is explicitly authorized to reuse the operator's saved
 # Chrome sessions. This eliminates repeated native fallback and allows the
 # typed browser layer to attach to the exact existing pid/window pair.
