@@ -66,6 +66,7 @@ def main() -> int:
         "python tools/batch_vpic_decode.py *",
         "python tools/batch_posting_manifest.py *",
         "python tools/batch_checkpoint.py *",
+        "python tools/latest_chrome_download.py *",
         "python tools/focus_autosoft_rdp.py *",
         "python tools/autosoft_pin_login.py *",
         "python tools/dashboard_callback.py *",

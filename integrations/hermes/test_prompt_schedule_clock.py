@@ -64,11 +64,22 @@ class PromptScheduleClockTests(unittest.TestCase):
         apply_config = (ROOT / "apply_prompt_config.py").read_text(encoding="utf-8")
         for command in (
             "python tools/batch_posting_manifest.py *",
+            "python tools/latest_chrome_download.py *",
             "python tools/autosoft_pin_login.py *",
             "python tools/dashboard_callback.py *",
         ):
             self.assertIn(command, configure)
             self.assertIn(command, apply_config)
+
+    def test_stock_sheet_download_is_resolved_from_current_chrome_ledger(self) -> None:
+        prompt = (ROOT / "vehicle-ready-prompt.txt").read_text(encoding="utf-8")
+        configure = (ROOT / "configure_orgo_webhook.ps1").read_text(encoding="utf-8")
+        for policy in (prompt, configure):
+            self.assertIn("latest_chrome_download.py", policy)
+            self.assertIn("older named-session workspace", policy)
+            self.assertIn("Never enumerate `Downloads`", policy)
+            self.assertIn("filename/mtime", policy)
+            self.assertIn("download start after the write completed", policy)
 
     def test_browser_use_reuses_one_approved_named_session(self) -> None:
         prompt = (ROOT / "vehicle-ready-prompt.txt").read_text(encoding="utf-8")
