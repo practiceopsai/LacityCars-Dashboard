@@ -49,6 +49,16 @@ class PromptScheduleClockTests(unittest.TestCase):
             self.assertIn("Source accepts at most 20 characters", policy)
             self.assertIn("source_autosoft", policy)
 
+    def test_post_direct_waits_for_async_inventory_job_before_classifying(self) -> None:
+        prompt = (ROOT / "vehicle-ready-prompt.txt").read_text(encoding="utf-8")
+        configure = (ROOT / "configure_orgo_webhook.ps1").read_text(encoding="utf-8")
+        for policy in (prompt, configure):
+            self.assertIn("Post Direct` is asynchronous", policy)
+            self.assertIn("select the current accounting period exactly once", policy)
+            self.assertIn("Never click the period twice", policy)
+            self.assertIn("Inventory > Vehicle Internals", policy)
+            self.assertIn("zero original inventory, zero internals", policy)
+
     def test_headless_checkpoint_helper_has_narrow_allowlist(self) -> None:
         configure = (ROOT / "configure_orgo_webhook.ps1").read_text(encoding="utf-8")
         self.assertIn(
