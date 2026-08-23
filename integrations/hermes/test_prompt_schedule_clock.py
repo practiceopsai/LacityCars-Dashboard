@@ -80,6 +80,9 @@ class PromptScheduleClockTests(unittest.TestCase):
             self.assertIn("Never enumerate `Downloads`", policy)
             self.assertIn("filename/mtime", policy)
             self.assertIn("download start after the write completed", policy)
+            self.assertIn("literal `STOCK SHEET LA CITY CARS`", policy)
+            self.assertIn("literal `STOCK SHEET COLUMBIA`", policy)
+            self.assertIn("Never derive that prefix from a decorated browser/tab title", policy)
 
     def test_browser_use_reuses_one_approved_named_session(self) -> None:
         prompt = (ROOT / "vehicle-ready-prompt.txt").read_text(encoding="utf-8")
