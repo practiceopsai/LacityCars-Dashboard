@@ -81,6 +81,9 @@ class PromptScheduleClockTests(unittest.TestCase):
             self.assertIn("one call MUST combine tab discovery, navigation, every VIN search", policy)
             self.assertIn("reuse the tab whose URL/title proves the authenticated NextGear dealer application", policy)
             self.assertIn("Never call `new_tab` for the public NextGear homepage", policy)
+            self.assertIn("below 3,500 characters", policy)
+            self.assertIn("exactly one compact JSON line", policy)
+            self.assertIn("instead of retrying truncated code", policy)
 
     def test_configure_can_apply_policy_without_restarting_a_live_gateway(self) -> None:
         configure = (ROOT / "configure_orgo_webhook.ps1").read_text(encoding="utf-8")
