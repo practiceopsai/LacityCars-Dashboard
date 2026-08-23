@@ -48,6 +48,15 @@ class LatestChromeDownloadTests(unittest.TestCase):
             self.assertTrue(result["ready"])
             self.assertEqual(Path(result["path"]), workbook.resolve())
 
+            decorated_result = resolve_download(
+                history,
+                "🐴 STOCK SHEET LA CITY CARS - Google Sheets",
+                datetime(2026, 8, 23, 4, 59, tzinfo=timezone.utc),
+                profile,
+            )
+            self.assertTrue(decorated_result["ready"])
+            self.assertEqual(Path(decorated_result["path"]), workbook.resolve())
+
     def test_rejects_old_or_outside_download(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             profile = Path(temporary)

@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +20,14 @@ from typing import Any
 
 
 CHROME_EPOCH_OFFSET_SECONDS = 11_644_473_600
+
+
+def normalized_prefix(value: str) -> str:
+    """Normalize harmless Chrome title decorations without broadening the store name."""
+    normalized = re.sub(r"^[^0-9A-Za-z]+", "", value.strip())
+    if normalized.casefold().endswith(" - google sheets"):
+        normalized = normalized[: -len(" - Google Sheets")]
+    return normalized.casefold()
 
 
 def parse_utc(value: str) -> datetime:
@@ -66,7 +75,7 @@ def resolve_download(
     finally:
         connection.close()
 
-    prefix = filename_prefix.casefold()
+    prefix = normalized_prefix(filename_prefix)
     for row in rows:
         started = chrome_time_to_utc(row["start_time"])
         if started < since_utc:
