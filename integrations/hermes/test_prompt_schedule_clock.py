@@ -63,6 +63,15 @@ class PromptScheduleClockTests(unittest.TestCase):
             self.assertIn("fixed named session `vehicle-stocking`", policy)
             self.assertIn("never create an unnamed or alternate Browser Use session", policy)
 
+    def test_browser_use_batches_site_work_and_reuses_authenticated_tab(self) -> None:
+        prompt = (ROOT / "vehicle-ready-prompt.txt").read_text(encoding="utf-8")
+        configure = (ROOT / "configure_orgo_webhook.ps1").read_text(encoding="utf-8")
+        for policy in (prompt, configure):
+            self.assertIn("`timeout_s` of at least 300 seconds", policy)
+            self.assertIn("one call MUST combine tab discovery, navigation, every VIN search", policy)
+            self.assertIn("reuse the tab whose URL/title proves the authenticated NextGear dealer application", policy)
+            self.assertIn("Never call `new_tab` for the public NextGear homepage", policy)
+
 
 if __name__ == "__main__":
     unittest.main()
