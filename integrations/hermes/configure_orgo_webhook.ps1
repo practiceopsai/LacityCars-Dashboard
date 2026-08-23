@@ -10,7 +10,8 @@ param(
     [string]$BatchManifestHelper = "$PSScriptRoot\batch_manifest_preflight.py",
     [string]$BatchPostingManifestHelper = "$PSScriptRoot\batch_posting_manifest.py",
     [string]$BatchDecodeHelper = "$PSScriptRoot\batch_vpic_decode.py",
-    [string]$BatchCheckpointHelper = "$PSScriptRoot\batch_checkpoint.py"
+    [string]$BatchCheckpointHelper = "$PSScriptRoot\batch_checkpoint.py",
+    [switch]$SkipGatewayRestart
 )
 
 $ErrorActionPreference = 'Stop'
@@ -228,21 +229,26 @@ if (Test-Path -LiteralPath $nodeDir) {
     }
     if (@($env:Path -split ';') -notcontains $nodeDir) { $env:Path = "$nodeDir;$env:Path" }
 }
-& $hermes gateway restart | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'Hermes gateway restart failed' }
-
-$deadline = (Get-Date).AddSeconds(45)
 $health = $null
-do {
-    Start-Sleep -Seconds 2
+if ($SkipGatewayRestart) {
     try { $health = Invoke-RestMethod 'http://127.0.0.1:8644/health' -TimeoutSec 3 } catch { $health = $null }
-} until ($health -or (Get-Date) -ge $deadline)
-if (-not $health -or $health.status -ne 'ok') { throw 'Hermes webhook health check failed after restart' }
+} else {
+    & $hermes gateway restart | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Hermes gateway restart failed' }
+
+    $deadline = (Get-Date).AddMinutes(10)
+    do {
+        Start-Sleep -Seconds 2
+        try { $health = Invoke-RestMethod 'http://127.0.0.1:8644/health' -TimeoutSec 3 } catch { $health = $null }
+    } until ($health -or (Get-Date) -ge $deadline)
+    if (-not $health -or $health.status -ne 'ok') { throw 'Hermes webhook health check failed after restart' }
+}
 
 [PSCustomObject]@{
     trigger_secret_configured = ($triggerSecret.Length -ge 32)
     callback_secret_configured = ($callbackSecret.Length -ge 16)
-    webhook_health = $health.status
+    webhook_health = if ($health) { $health.status } else { 'restart-skipped-unavailable' }
+    gateway_restart_skipped = [bool]$SkipGatewayRestart
     helper_path = (Join-Path $toolsDir 'dashboard_callback.py')
     focus_helper_path = (Join-Path $toolsDir 'focus_autosoft_rdp.py')
     batch_source_helper_path = (Join-Path $toolsDir 'batch_source_preflight.py')

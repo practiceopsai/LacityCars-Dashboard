@@ -72,6 +72,12 @@ class PromptScheduleClockTests(unittest.TestCase):
             self.assertIn("reuse the tab whose URL/title proves the authenticated NextGear dealer application", policy)
             self.assertIn("Never call `new_tab` for the public NextGear homepage", policy)
 
+    def test_configure_can_apply_policy_without_restarting_a_live_gateway(self) -> None:
+        configure = (ROOT / "configure_orgo_webhook.ps1").read_text(encoding="utf-8")
+        self.assertIn("[switch]$SkipGatewayRestart", configure)
+        self.assertIn("gateway_restart_skipped = [bool]$SkipGatewayRestart", configure)
+        self.assertIn("AddMinutes(10)", configure)
+
 
 if __name__ == "__main__":
     unittest.main()
