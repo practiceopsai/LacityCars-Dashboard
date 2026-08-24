@@ -22,6 +22,17 @@ function toBase64(value: string): string {
   return Buffer.from(value, "utf8").toString("base64");
 }
 
+export function deliveryLaunchKey(
+  requestId: string,
+  timestamp: string,
+  signature: string,
+): string {
+  return createHash("sha256")
+    .update(`${requestId}.${timestamp}.${signature}`)
+    .digest("hex")
+    .slice(0, 20);
+}
+
 function buildOrgoForwardCommand(
   localUrl: string,
   body: string,
@@ -49,10 +60,7 @@ function buildOrgoForwardCommand(
   ].join("; ");
   // Windows PowerShell's -EncodedCommand consumes UTF-16LE.
   const encodedDelivery = Buffer.from(deliveryScript, "utf16le").toString("base64");
-  const launchKey = createHash("sha256")
-    .update(`${requestId}.${timestamp}.${signature}`)
-    .digest("hex")
-    .slice(0, 20);
+  const launchKey = deliveryLaunchKey(requestId, timestamp, signature);
 
   return [
     "$ErrorActionPreference='Stop'",
@@ -142,5 +150,96 @@ export async function triggerHermes(
         `Orgo could not forward the Hermes webhook: ${(result.stderr || result.stdout || "unknown error").slice(0, 500)}`,
       );
     }
+    // The launch command only proves a detached delivery process was created.
+    // The gateway's actual response is written to the delivery's stdout log.
+    // Require the gateway's acceptance so a dead loopback listener fails the
+    // trigger now (BullMQ retry / FAILED) instead of surfacing 90 minutes
+    // later as a watchdog timeout on a vehicle that was never picked up.
+    await verifyOrgoDeliveryAccepted(
+      config,
+      deliveryLaunchKey(payload.request_id, timestamp, signature),
+    );
+  }
+}
+
+/** Read one dispatch log file on the Windows host through the Orgo bash route. */
+async function readDispatchLog(
+  config: WorkerConfig,
+  launchKey: string,
+  stream: "stdout" | "stderr",
+): Promise<string> {
+  const path = `C:\\data\\lacity-hermes-dispatch\\${launchKey}.${stream}.log`;
+  const command = `$ErrorActionPreference='SilentlyContinue'; Get-Content -LiteralPath '${path}' -Raw`;
+  let response: Response;
+  try {
+    response = await fetch(config.HERMES_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(config.HERMES_PROXY_TOKEN
+          ? { Authorization: `Bearer ${config.HERMES_PROXY_TOKEN}` }
+          : {}),
+      },
+      body: JSON.stringify({ command }),
+      signal: AbortSignal.timeout(60_000),
+    });
+  } catch (err) {
+    throw new HermesTriggerError(
+      `Could not read Hermes delivery log: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (!response.ok) {
+    throw new HermesTriggerError(
+      `Hermes delivery log read returned HTTP ${response.status}`,
+      response.status,
+    );
+  }
+  const body = await response.text();
+  try {
+    const result = JSON.parse(body) as OrgoCommandResult;
+    return result.stdout ?? "";
+  } catch {
+    return "";
+  }
+}
+
+const DELIVERY_FAILURE_PATTERNS = [
+  /unable to connect/i,
+  /actively refused/i,
+  /connection refused/i,
+  /could not be resolved/i,
+  /operation has timed out/i,
+  /invoke-restmethod/i,
+];
+
+/**
+ * Poll the delivery stdout/stderr logs until the gateway acknowledges the
+ * webhook ("status":"accepted") or a terminal delivery failure appears.
+ */
+export async function verifyOrgoDeliveryAccepted(
+  config: WorkerConfig,
+  launchKey: string,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+): Promise<void> {
+  const deadline = Date.now() + config.HERMES_DELIVERY_VERIFY_MS;
+  let lastStdout = "";
+  let lastStderr = "";
+  for (;;) {
+    lastStdout = await readDispatchLog(config, launchKey, "stdout");
+    if (/"status"\s*:\s*"accepted"/i.test(lastStdout)) return;
+    lastStderr = await readDispatchLog(config, launchKey, "stderr");
+    const failure = DELIVERY_FAILURE_PATTERNS.find((pattern) => pattern.test(lastStderr));
+    if (failure) {
+      throw new HermesTriggerError(
+        `Hermes gateway did not accept the delivery (${failure.source}): ${lastStderr.replace(/\s+/g, " ").slice(0, 400)}`,
+      );
+    }
+    if (Date.now() >= deadline) {
+      throw new HermesTriggerError(
+        `Hermes gateway did not acknowledge delivery ${launchKey} within ${config.HERMES_DELIVERY_VERIFY_MS}ms` +
+          (lastStdout ? `; last stdout: ${lastStdout.slice(0, 200)}` : "; delivery log is empty"),
+      );
+    }
+    await sleep(config.HERMES_DELIVERY_POLL_MS);
   }
 }

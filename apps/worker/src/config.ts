@@ -28,6 +28,12 @@ const EnvSchema = z
     // Keep this above the forwarding command's timeout so a valid acceptance
     // cannot be mistaken for a failed trigger and release the desktop lock.
     HERMES_TIMEOUT_MS: z.coerce.number().int().min(180_000).default(240_000),
+    // After launching the detached delivery process, the worker polls the
+    // delivery's stdout log until the gateway's own {"status":"accepted"}
+    // response appears. A dead loopback gateway therefore fails the trigger
+    // within this window instead of ripening into a 90-minute watchdog FAILED.
+    HERMES_DELIVERY_VERIFY_MS: z.coerce.number().int().min(10_000).default(90_000),
+    HERMES_DELIVERY_POLL_MS: z.coerce.number().int().min(1_000).default(5_000),
     HERMES_BUSY_DELAY_MS: z.coerce.number().int().min(5_000).default(30_000),
     HERMES_PROCESSING_TIMEOUT_MS: z.coerce.number().int().min(60_000).default(5_400_000),
     HERMES_WATCHDOG_INTERVAL_MS: z.coerce.number().int().min(10_000).default(60_000),
