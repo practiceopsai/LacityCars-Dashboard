@@ -5,7 +5,7 @@ import type { MailIntakeConfig } from "./config";
 import { logger } from "./logger";
 import { verifySvixSignature } from "./svix";
 import { verifyExtractionCallback } from "./extract/pdfHermes";
-import type { MailIntakeJobData } from "./queues";
+import { jobKey, type MailIntakeJobData } from "./queues";
 
 interface RawBodyRequest extends Request {
   rawBody?: Buffer;
@@ -83,7 +83,7 @@ export function createApp(config: MailIntakeConfig, queue: Queue<MailIntakeJobDa
 
     // Ack immediately; the queue does the work. jobId dedupes redeliveries.
     void queue
-      .add("message", { kind: "message", messageId }, { jobId: `msg:${messageId}` })
+      .add("message", { kind: "message", messageId }, { jobId: jobKey("msg", messageId) })
       .catch((err) => logger.error({ err, messageId }, "Failed to enqueue message job"));
     res.status(202).json({ accepted: true });
   });
@@ -122,7 +122,7 @@ export function createApp(config: MailIntakeConfig, queue: Queue<MailIntakeJobDa
           })),
           pdfWarnings: warnings,
         },
-        { jobId: `finalize:${request_id}` },
+        { jobId: jobKey("finalize", request_id) },
       )
       .catch((err) => logger.error({ err, request_id }, "Failed to enqueue finalize job"));
     res.json({ status: "accepted" });

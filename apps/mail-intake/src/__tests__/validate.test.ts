@@ -84,3 +84,13 @@ describe("validateRows", () => {
     expect(outcome.problems[0]!.reasons.join(" ")).toContain("No model");
   });
 });
+
+describe("jobKey", () => {
+  it("never emits a colon even for hostile ids", async () => {
+    const { jobKey } = await import("../queues");
+    const key = jobKey("msg", "<0100:weird@example.com>");
+    expect(key).not.toContain(":");
+    expect(key).toMatch(/^msg-[0-9a-f]{16}$/);
+    expect(jobKey("msg", "<0100:weird@example.com>")).toBe(key);
+  });
+});

@@ -19,6 +19,7 @@ import { buildNoVehiclesReply, buildReply } from "./reply";
 import { nextStockingWindowIso } from "./schedule";
 import { findStoreInText, validateRows } from "./validate";
 import {
+  jobKey,
   savePending,
   takePending,
   type FinalizeJobData,
@@ -198,7 +199,7 @@ async function processMessage(deps: ProcessorDeps, job: Job<MessageJobData>): Pr
       await deps.queue.add(
         "extraction-timeout",
         { kind: "extraction-timeout", messageId: message.message_id },
-        { delay: config.EXTRACTION_TIMEOUT_MS, jobId: `timeout:${message.message_id}` },
+        { delay: config.EXTRACTION_TIMEOUT_MS, jobId: jobKey("timeout", message.message_id) },
       );
       logger.info(
         { messageId: message.message_id, pdfs: pdfPaths.length },

@@ -1,8 +1,17 @@
+import { createHash } from "node:crypto";
 import { Queue } from "bullmq";
 import { Redis } from "ioredis";
 import type { ExtractedRow } from "./extract/types";
 
 export const MAIL_INTAKE_QUEUE = "mail-intake";
+
+/**
+ * Deterministic BullMQ job id for idempotent enqueues. Email message ids are
+ * arbitrary strings and BullMQ forbids ':' in custom ids, so hash them.
+ */
+export function jobKey(prefix: string, id: string): string {
+  return `${prefix}-${createHash("sha256").update(id).digest("hex").slice(0, 16)}`;
+}
 
 /** Job that processes one received email end to end (or up to PDF hand-off). */
 export interface MessageJobData {
