@@ -78,7 +78,24 @@ export async function getAttachment(
     config,
     `/inboxes/${encodeURIComponent(config.AGENTMAIL_INBOX_ID)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
   );
-  return Buffer.from(await response.arrayBuffer());
+  const raw = Buffer.from(await response.arrayBuffer());
+  // The endpoint returns JSON metadata with a presigned download_url; the file
+  // bytes live on the CDN. Fall back to treating the body as the file itself
+  // if the response is not that JSON shape.
+  try {
+    const meta = JSON.parse(raw.toString("utf8")) as { download_url?: string };
+    if (meta.download_url) {
+      const file = await fetch(meta.download_url, { signal: AbortSignal.timeout(60_000) });
+      if (!file.ok) {
+        throw new AgentMailError(`Attachment CDN download failed: ${file.status}`, file.status);
+      }
+      return Buffer.from(await file.arrayBuffer());
+    }
+  } catch (err) {
+    if (err instanceof AgentMailError) throw err;
+    // Not JSON — the body already is the attachment.
+  }
+  return raw;
 }
 
 export async function replyToMessage(

@@ -71,8 +71,11 @@ async function finalize(
 
   const { clean, problems } = validateRows(rows, fallbackStore, scheduledAt);
   if (clean.length === 0 && problems.length === 0) {
-    const reply = buildNoVehiclesReply("No vehicle rows were found in the attachments.");
-    await replyToMessage(config, message.message_id, reply);
+    const detail =
+      warnings.length > 0
+        ? `No vehicle rows were found in the attachments.\n\nDetails:\n${warnings.map((w) => `- ${w}`).join("\n")}`
+        : "No vehicle rows were found in the attachments.";
+    await replyToMessage(config, message.message_id, buildNoVehiclesReply(detail));
     return;
   }
 
