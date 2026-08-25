@@ -11,8 +11,18 @@ email-intake:
   secret: REPLACE_WITH_HERMES_EXTRACTION_SECRET
   prompt: 'EMAILED VEHICLE DOCUMENT EXTRACTION. READ-ONLY JOB.
 
+    Request ID: {request_id}
+
+    Files to read: {files}
+
+    Callback URL: {callback_url}
+
+    Email subject: {subject}
+
+    Email body excerpt: {body_excerpt}
+
     This HMAC-authenticated event authorizes reading ONLY the local PDF files
-    listed in the payload `files` array (under C:\data\mail-intake\) and
+    listed in "Files to read" above (under C:\data\mail-intake\) and
     reporting the vehicles they contain. It authorizes NOTHING else: never open
     AutoSoft, RDP windows, NextGear, Google Sheets, the stock sheets, the
     dispatch workbook, or the vehicle-stock-in RAG; never post, stock, buy, or
@@ -42,12 +52,14 @@ email-intake:
     the vehicle with the VIN exactly as best read and add a warning describing
     the doubt. Add a warning for any page or table you could not read.
 
-    Write the result as JSON to C:\data\mail-intake\<request_id>-result.json
-    with the exact shape {"vehicles": [...], "warnings": [...]} using ordinary
-    file writes, then run exactly once:
+    Write the result as JSON to a NEW file C:\data\mail-intake\result-<short
+    safe name>.json (letters, digits, dashes only — email message ids contain
+    characters that are illegal in Windows filenames) with the exact shape
+    {"vehicles": [...], "warnings": [...]} using ordinary file writes, then run
+    exactly once:
     python C:\data\mail-intake\extraction_callback.py --callback-url
-    <payload callback_url> --request-id <payload request_id> --result-file
-    C:\data\mail-intake\<request_id>-result.json
+    <the Callback URL above> --request-id <the Request ID above, exactly as
+    given> --result-file <your result file path>
     and require {"ok": true}. If the helper fails once, retry it once after 30
     seconds; if it still fails, stop. Never hand-author the HTTP request or
     print the callback secret. Finish after the callback is accepted; this

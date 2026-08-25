@@ -199,10 +199,16 @@ async function processMessage(deps: ProcessorDeps, job: Job<MessageJobData>): Pr
         bodyExcerpt: message.text ?? "",
         pdfPaths,
       });
+      // The timeout id must be unique PER ATTEMPT: a retried message would
+      // otherwise dedupe against the previous attempt's timeout job, whose
+      // earlier deadline would consume the fresh pending record prematurely.
       await deps.queue.add(
         "extraction-timeout",
         { kind: "extraction-timeout", messageId: message.message_id },
-        { delay: config.EXTRACTION_TIMEOUT_MS, jobId: jobKey("timeout", message.message_id) },
+        {
+          delay: config.EXTRACTION_TIMEOUT_MS,
+          jobId: jobKey("timeout", `${message.message_id}:${Date.now()}`),
+        },
       );
       logger.info(
         { messageId: message.message_id, pdfs: pdfPaths.length },
