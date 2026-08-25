@@ -5,6 +5,8 @@ import { logger } from "./logger";
 import { createApp } from "./app";
 import { createMailProcessor } from "./processor";
 import { createMailIntakeQueue, MAIL_INTAKE_QUEUE, type MailIntakeJobData } from "./queues";
+import { replyToMessage, sendMessage } from "./agentmail";
+import { buildNoVehiclesReply } from "./reply";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -19,6 +21,25 @@ async function main(): Promise<void> {
   );
   worker.on("failed", (job, err) => {
     logger.error({ jobId: job?.id, kind: job?.data.kind, err }, "Mail-intake job failed");
+    // On the FINAL attempt, never go silent: bounce the sender and alert the
+    // operator so a dead email is always visible to a human.
+    const exhausted = job && job.attemptsMade >= (job.opts.attempts ?? 1);
+    if (exhausted && (job.data.kind === "message" || job.data.kind === "finalize")) {
+      const messageId = job.data.messageId;
+      void replyToMessage(
+        config,
+        messageId,
+        buildNoVehiclesReply(
+          "This email could not be processed automatically after several attempts. Nothing was queued — please resend, or contact the operator.",
+        ),
+      ).catch((replyErr) => logger.error({ replyErr, messageId }, "Failed to send failure bounce"));
+      void sendMessage(
+        config,
+        config.ALERT_EMAIL,
+        "Mail intake: email processing failed permanently",
+        { text: `Message ${messageId} failed all attempts.\nLast error: ${err?.message ?? "unknown"}` },
+      ).catch((alertErr) => logger.error({ alertErr, messageId }, "Failed to send failure alert"));
+    }
   });
   worker.on("error", (err) => {
     logger.error({ err }, "Mail-intake worker error");

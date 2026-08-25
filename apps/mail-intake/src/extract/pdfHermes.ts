@@ -120,20 +120,31 @@ export async function triggerPdfExtraction(
     .update(`${timestamp}.${payload}`)
     .digest("hex");
 
+  // Same pattern as the worker's buildOrgoForwardCommand: every dynamic
+  // string enters PowerShell base64-encoded, and the detached POST runs via
+  // -EncodedCommand (UTF-16LE) so no quoting survives to be broken.
+  const b64 = (value: string) => Buffer.from(value, "utf8").toString("base64");
   const launchKey = randomUUID().slice(0, 12);
-  const logPath = `${VM_BASE_DIR}\\\\dispatch-${launchKey}`;
-  const payloadB64 = Buffer.from(payload, "utf8").toString("base64");
+  const deliveryScript = [
+    "$ErrorActionPreference='Stop'",
+    `$url=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${b64(gatewayUrl)}'))`,
+    `$body=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${b64(payload)}'))`,
+    `$headers=@{'X-Webhook-Timestamp'='${timestamp}';'X-Webhook-Signature-V2'='${signature}'}`,
+    "$response=Invoke-RestMethod -Method Post -Uri $url -Headers $headers -ContentType 'application/json' -Body $body -TimeoutSec 21600",
+    "$response | ConvertTo-Json -Compress",
+  ].join("; ");
+  const encodedDelivery = Buffer.from(deliveryScript, "utf16le").toString("base64");
   const command = [
-    `New-Item -ItemType Directory -Force '${VM_BASE_DIR}' | Out-Null`,
-    `[IO.File]::WriteAllBytes('${logPath}.payload.json',[Convert]::FromBase64String('${payloadB64}'))`,
-    `Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-Command',` +
-      `"try { \\$r = Invoke-RestMethod -Method Post -Uri '${gatewayUrl}' -ContentType 'application/json' ` +
-      `-Headers @{ 'X-Webhook-Timestamp' = '${timestamp}'; 'X-Webhook-Signature-V2' = '${signature}' } ` +
-      `-InFile '${logPath}.payload.json' -TimeoutSec 240; ` +
-      `\\$r | ConvertTo-Json -Compress | Out-File '${logPath}.stdout.log' } ` +
-      `catch { \\$_ | Out-String | Out-File '${logPath}.stderr.log' }"`,
+    "$ErrorActionPreference='Stop'",
+    "$dir='C:\\data\\mail-intake'",
+    "[IO.Directory]::CreateDirectory($dir)|Out-Null",
+    `$stdout=Join-Path $dir 'dispatch-${launchKey}.stdout.log'`,
+    `$stderr=Join-Path $dir 'dispatch-${launchKey}.stderr.log'`,
+    `$process=Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-NonInteractive','-WindowStyle','Hidden','-EncodedCommand','${encodedDelivery}') -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru`,
+    `[pscustomobject]@{accepted=$true;process_id=$process.Id}|ConvertTo-Json -Compress`,
   ].join("; ");
   await orgoBash(config, command);
+  const logPath = `C:\\data\\mail-intake\\dispatch-${launchKey}`;
 
   // Poll the detached POST's stdout for the gateway acceptance.
   const deadline = Date.now() + 120_000;
