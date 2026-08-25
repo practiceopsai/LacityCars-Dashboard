@@ -108,7 +108,7 @@ export async function triggerPdfExtraction(
 ): Promise<void> {
   const gatewayUrl = config.HERMES_LOCAL_WEBHOOK_URL || "http://127.0.0.1:8644/webhook";
   const payload = JSON.stringify({
-    event: "document.extract",
+    event_type: "document.extract",
     request_id: input.messageId,
     subject: input.subject.slice(0, 300),
     body_excerpt: input.bodyExcerpt.slice(0, 1500),
