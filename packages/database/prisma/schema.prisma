@@ -79,6 +79,9 @@ model Vehicle {
   batchPosition      Int?
   vin                String
   model              String
+  /// Purchase source as stated at intake (e.g. from a staff email document).
+  /// Reference only — posting uses the NextGear-verified source.
+  source             String?
   status             VehicleStatus  @default(PENDING)
   stockNumber        String?
   freightAmount      Decimal?       @db.Decimal(12, 2)

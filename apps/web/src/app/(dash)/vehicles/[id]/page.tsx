@@ -258,6 +258,8 @@ export default function VehicleDetailPage() {
               <dd>{fmtMoney(vehicle.acv)}</dd>
               <dt>Final total</dt>
               <dd>{fmtMoney(vehicle.finalTotal)}</dd>
+              <dt>Intake source</dt>
+              <dd>{vehicle.source ?? "—"}</dd>
               <dt>RAG commit</dt>
               <dd className="vin">{vehicle.ragCommitId ?? "—"}</dd>
               <dt>Completed</dt>

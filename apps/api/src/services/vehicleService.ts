@@ -21,6 +21,7 @@ export function serializeVehicle(vehicle: VehicleWithStore) {
     vin: vehicle.vin,
     vinMasked: maskVin(vehicle.vin),
     model: vehicle.model,
+    source: vehicle.source,
     status: vehicle.status,
     stockNumber: vehicle.stockNumber,
     store: {
@@ -91,7 +92,14 @@ export interface IntakeItemResult {
  */
 export async function intakeVehicle(
   prisma: PrismaClient,
-  input: { store: string; vin: string; model: string; stockNumber?: string; scheduledAt: string },
+  input: {
+    store: string;
+    vin: string;
+    model: string;
+    stockNumber?: string;
+    source?: string;
+    scheduledAt: string;
+  },
 ): Promise<IntakeItemResult> {
   const vinCheck = validateVin(input.vin);
   if (!vinCheck.ok || !vinCheck.vin) {
@@ -121,6 +129,7 @@ export async function intakeVehicle(
       storeId: store.id,
       vin,
       model: input.model,
+      source: input.source ?? null,
       stockNumber: input.stockNumber ?? null,
       scheduledStartAt,
       status: "PENDING",
@@ -132,6 +141,7 @@ export async function intakeVehicle(
           payload: {
             model: input.model,
             stockNumber: input.stockNumber ?? null,
+            source: input.source ?? null,
             scheduledStartAt: scheduledStartAt.toISOString(),
           },
         },

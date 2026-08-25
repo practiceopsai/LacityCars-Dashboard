@@ -6,10 +6,11 @@ const commands = {
   api: ["node", ["apps/api/dist/index.js"]],
   worker: ["node", ["apps/worker/dist/index.js"]],
   web: ["pnpm", ["--filter", "@lacity/web", "start"]],
+  "mail-intake": ["node", ["apps/mail-intake/dist/index.js"]],
 };
 
 if (!(service in commands)) {
-  console.error("APP_SERVICE must be one of: api, worker, web");
+  console.error("APP_SERVICE must be one of: api, worker, web, mail-intake");
   process.exit(1);
 }
 

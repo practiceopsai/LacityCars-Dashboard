@@ -34,6 +34,7 @@ export interface VehicleDto {
   scheduledStartAt: string | null;
   acv: number | null;
   finalTotal: number | null;
+  source: string | null;
   ragCommitId: string | null;
   failureReason: string | null;
   runSummary: string | null;

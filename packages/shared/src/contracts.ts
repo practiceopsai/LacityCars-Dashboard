@@ -7,6 +7,8 @@ export const IntakeVehicleSchema = z.object({
   vin: z.string().trim().min(1, "VIN is required"),
   model: z.string().trim().min(1, "Model is required").max(120),
   stockNumber: z.string().trim().max(32).optional(),
+  /** Purchase source as stated at intake. Reference only — never overrides NextGear evidence. */
+  source: z.string().trim().max(80).optional(),
   scheduledAt: z.string().datetime({ offset: true }),
 });
 export type IntakeVehicle = z.infer<typeof IntakeVehicleSchema>;
